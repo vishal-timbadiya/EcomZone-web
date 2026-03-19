@@ -1,0 +1,208 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  mobile    String
+  password  String
+  role      String   @default("USER")
+  isSuperAdmin Boolean @default(false)
+  isActive   Boolean @default(true)
+  permissions Json?
+  gstNumber String?
+  resetPasswordToken   String?
+  resetPasswordExpires DateTime?
+  createdAt DateTime @default(now())
+
+  orders Order[]
+}
+
+model Product {
+  id            String      @id @default(uuid())
+  productCode    String?      @unique @default(uuid())
+  name          String
+  slug          String      @unique
+  description   String
+  imageUrl      String      @default("")
+  imageUrls     Json        @default("[]")
+  singlePrice   Float
+  cartonPrice   Float       @default(0)
+  cartonPcsPrice Float      @default(0)
+  cartonQty     Int
+  gstPercentage Float
+  hsnCode       String?     @default("") // HSN Code - 4, 6 or 8 digits
+  weight       Float       @default(0)
+  stock         Int
+  category      String      @default("general") // Primary category (backward compatibility)
+  categories    String[]    @default([]) // Multiple categories
+  subCategory  String?     @default("general")
+  isBestseller Boolean     @default(false) // Bestseller tag
+  isNewArrival Boolean     @default(false) // New Arrival tag
+  isTopRanking Boolean     @default(false) // Top Ranking tag
+  isActive      Boolean     @default(true)
+  createdAt     DateTime    @default(now())
+  orderItems    OrderItem[]
+}
+
+
+model Order {
+  id      String @id @default(uuid())
+  orderId String @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  subtotal       Float
+  gstAmount      Float
+  shippingCharge Float @default(0)
+  totalWeight   Float @default(0)
+  totalAmount   Float
+
+  paymentMode   PaymentMode
+  paymentStatus PaymentStatus @default(PENDING)
+
+  orderStatus OrderStatus @default(CONFIRMED)
+
+  courierName String?
+  trackingId  String?
+
+  // Address and GST stored as JSON
+  shippingAddress Json?
+  billingAddress Json?
+  gstDetails      Json?
+
+  // PDF Tracking
+  pdfGeneratedAt DateTime?
+  pdfSerialNumber Int?
+
+  createdAt DateTime @default(now())
+
+  items OrderItem[]
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  order     Order   @relation(fields: [orderId], references: [id])
+  orderId   String
+  product   Product @relation(fields: [productId], references: [id])
+  productId String
+  quantity  Int
+  price     Float
+}
+
+model Settings {
+  id         String   @id @default(uuid())
+  codEnabled Boolean  @default(true)
+  createdAt  DateTime @default(now())
+}
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  icon      String   @default("📦")
+  imageUrl  String?  @default("")
+  position  Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+enum Role {
+  ADMIN
+  CUSTOMER
+}
+
+enum PaymentMode {
+  COD
+  UPI
+  PHONEPE
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum OrderStatus {
+  CONFIRMED
+  PACKED
+  DISPATCHED
+  DELIVERED
+  CANCELLED
+}
+
+// ============================================
+// Learning Activity Tracker Models
+// ============================================
+
+model LearningModule {
+  id          String   @id @default(uuid())
+  name        String
+  description String
+  category    String   // C, C++, Python, Rust, Linux, ADAS, Microcontrollers, SDLC, CI/CD
+  icon        String   @default("📚")
+  order       Int      @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  progress LearningProgress[]
+  sessions StudySession[]
+}
+
+model LearningProgress {
+  id                String         @id @default(uuid())
+  moduleId          String
+  module            LearningModule @relation(fields: [moduleId], references: [id])
+  status            ProgressStatus @default(NOT_STARTED)
+  progressPercentage Int           @default(0)
+  notes             String         @default("")
+  completedAt       DateTime?
+  updatedAt         DateTime       @default(now())
+
+  @@unique([moduleId])
+}
+
+model StudySession {
+  id        String         @id @default(uuid())
+  moduleId  String
+  module    LearningModule @relation(fields: [moduleId], references: [id])
+  duration  Int            // in minutes
+  notes     String         @default("")
+  sessionType SessionType @default(THEORY)
+  date      DateTime       @default(now())
+  createdAt DateTime       @default(now())
+}
+
+enum ProgressStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum SessionType {
+  THEORY
+  PRACTICE
+  PROJECT
+}
+
+// Shipping Rates Model
+model ShippingRate {
+  id        String   @id @default(uuid())
+  state     String
+  city      String?
+  ratePerKg Float
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([state, city])
+}

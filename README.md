@@ -1,5 +1,13 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Environment
+
+Create `.env.local` from `.env.example` and set your MongoDB connection string:
+
+```bash
+MONGODB_URI=your_mongodb_connection_string
+```
+
 ## Getting Started
 
 First, run the development server:
@@ -15,6 +23,29 @@ bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+## Products API
+
+Base URL: `http://localhost:3000/api/products`
+
+- `GET /api/products` -> list products
+- `POST /api/products` -> create product
+- `GET /api/products/:id` -> fetch one product
+- `PUT /api/products/:id` -> update product
+- `DELETE /api/products/:id` -> delete product
+
+Example `POST` body:
+
+```json
+{
+  "name": "Running Shoes",
+  "description": "Lightweight shoes for daily running",
+  "price": 89.99,
+  "imageUrl": "https://example.com/shoes.jpg",
+  "category": "footwear",
+  "inStock": true
+}
+```
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

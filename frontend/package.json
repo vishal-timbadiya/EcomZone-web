@@ -1,0 +1,33 @@
+{
+  "name": "ecomzone-frontend",
+  "version": "1.0.0",
+  "description": "EcomZone Frontend - Next.js UI",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "next": "16.1.6",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "@next/env": "16.1.6",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.0",
+    "jszip": "^3.10.1",
+    "pdf-lib": "^1.17.1",
+    "papaparse": "^5.5.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.1.6",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
