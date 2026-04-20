@@ -1,0 +1,4 @@
+name,productCode,description,category,subCategory,singlePrice,cartonPcsPrice,cartonQty,stock,gstPercentage,hsnCode,weight,isActive
+Product Name 1,CODE001,Product Description,general,basic,100.00,90.00,10,50,5,1234567890,0.5,true
+Product Name 2,CODE002,Another product,general,basic,200.00,200.00,9,100,5,1234567891,0.8,true
+Product Name 3,CODE003,Third product,general,basic,150.00,135.00,10,75,5,1234567892,0.6,true
