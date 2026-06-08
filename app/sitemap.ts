@@ -1,31 +1,18 @@
 import { MetadataRoute } from "next";
+import { prisma } from "@/server/lib/prisma";
 
 export const dynamic = "force-static";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
-  
   try {
-    const res = await fetch(`${apiUrl}/products`, { 
-      headers: { 'Content-Type': 'application/json' }
+    const products = await prisma.product.findMany({
+      select: { slug: true, createdAt: true },
+      where: { isActive: true },
     });
-    
-    if (!res.ok) {
-      console.error(`API returned ${res.status} for products endpoint`);
-      return [
-        {
-          url: "https://ecomzone.in",
-          lastModified: new Date(),
-        },
-      ];
-    }
-    
-    const data = await res.json();
-    const products = Array.isArray(data) ? data : (data.products || []);
 
-    const productUrls = products.map((product: any) => ({
+    const productUrls = products.map((product) => ({
       url: `https://ecomzone.in/product/${product.slug}`,
-      lastModified: new Date(),
+      lastModified: product.createdAt || new Date(),
     }));
 
     return [

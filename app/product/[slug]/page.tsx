@@ -1,21 +1,19 @@
 import { Metadata } from "next";
+import { prisma } from "@/server/lib/prisma";
+import { notFound } from "next/navigation";
 import ProductClient from "./ProductClient";
 
 export async function generateStaticParams() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
   try {
-    const res = await fetch(`${apiUrl}/products`, { cache: "force-cache" });
-    if (res.ok) {
-      const data = await res.json();
-      const products = Array.isArray(data) ? data : data.products || [];
-      const slugs = products.map((p: { slug: string }) => ({ slug: p.slug }));
-      if (slugs.length > 0) return slugs;
-    }
+    const products = await prisma.product.findMany({
+      select: { slug: true },
+      where: { isActive: true },
+    });
+    return products.map((p) => ({ slug: p.slug }));
   } catch {
-    // API unavailable at build time
+    // Database unavailable at build time
+    return [{ slug: "placeholder" }];
   }
-  // Fallback: ensures output:export does not fail when API is offline at build time
-  return [{ slug: "placeholder" }];
 }
 
 export async function generateMetadata({
@@ -23,23 +21,12 @@ export async function generateMetadata({
 }: {
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
-
   const { slug } = await params;
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
   try {
-    const res = await fetch(
-      `${apiUrl}/products/${slug}`,
-      { cache: "force-cache" }
-    );
-
-    if (!res.ok) {
-      return {
-        title: "Product Not Found",
-      };
-    }
-
-    const product = await res.json();
+    const product = await prisma.product.findUnique({
+      where: { slug },
+    });
 
     if (!product) {
       return {
@@ -55,7 +42,7 @@ export async function generateMetadata({
         description: product.description,
         images: [
           {
-            url: product.imageUrl,
+            url: product.imageUrl || "",
           },
         ],
       },
@@ -73,29 +60,16 @@ export default async function ProductPage({
 }: {
   params: Promise<{ slug: string }>;
 }) {
-
   const { slug } = await params;
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
-  
   try {
-    const res = await fetch(
-      `${apiUrl}/products/${slug}`,
-      { cache: "force-cache" }
-    );
+    const product = await prisma.product.findUnique({
+      where: { slug },
+    });
 
-    if (!res.ok) {
-      return (
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold">Product Not Found</h1>
-            <p className="text-gray-500 mt-2">The product you're looking for doesn't exist.</p>
-          </div>
-        </div>
-      );
+    if (!product) {
+      notFound();
     }
-
-    const product = await res.json();
 
     const structuredData = {
       "@context": "https://schema.org",
@@ -127,18 +101,11 @@ export default async function ProductPage({
             __html: JSON.stringify(structuredData),
           }}
         />
-        <ProductClient product={product} />
+        <ProductClient product={product as any} />
       </>
     );
   } catch (error) {
     console.error("Error loading product:", error);
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold">Error Loading Product</h1>
-          <p className="text-gray-500 mt-2">Unable to load the product. Please try again later.</p>
-        </div>
-      </div>
-    );
+    notFound();
   }
 }
