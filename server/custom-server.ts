@@ -26,15 +26,15 @@ async function startServer() {
       const url = new URL(req.url!, `http://${req.headers.host || 'localhost'}`);
       const pathname = url.pathname;
 
-      // Express handles all API routes and static uploads
+      // Express handles standard API routes and uploads, EXCEPT Next.js auth routes
       if (
-        pathname?.startsWith('/api/') ||
+        (pathname?.startsWith('/api/') && !pathname?.startsWith('/api/auth/')) ||
         pathname?.startsWith('/uploads/') ||
         pathname === '/health'
       ) {
         expressApp(req as any, res as any);
       } else {
-        // Next.js handles all frontend routes
+        // Next.js handles all frontend pages AND internal auth routes (/api/auth)
         handle(req, res, { pathname, query: Object.fromEntries(url.searchParams) });
       }
     });
