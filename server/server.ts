@@ -1,6 +1,18 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import path from 'path';
+import { prisma } from './lib/prisma';
+import { logger } from './lib/logger';
+import { 
+  apiLimiter, 
+  loginLimiter, 
+  signupLimiter, 
+  forgotPasswordLimiter,
+  adminLimiter,
+  uploadLimiter,
+  paymentLimiter
+} from './lib/rateLimiter';
+import * as Sentry from '@sentry/node';
 
 // import all API routes
 import authRoutes from './api/auth';
@@ -22,6 +34,20 @@ import testRoutes from './api/test';
 
 const app: Express = express();
 
+// Initialize Sentry for error tracking (if DSN is provided)
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || 'development',
+    tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+    integrations: [
+      new Sentry.Integrations.Http({ tracing: true }),
+    ],
+  });
+  app.use(Sentry.Handlers.requestHandler());
+  logger.info('Sentry error tracking initialized');
+}
+
 // Middleware
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
@@ -29,6 +55,18 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Security Headers Middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+});
 
 // JSON and URL-encoded parsers with exclusions for file uploads
 // Skip JSON parsing for multipart form data (file uploads)
@@ -81,36 +119,61 @@ app.get('/', (_req: Request, res: Response) => {
 });
 
 // Health check endpoint
-app.get('/health', (_req: Request, res: Response) => {
-  res.json({ status: 'Backend server is running', timestamp: new Date() });
+app.get('/health', async (_req: Request, res: Response) => {
+  try {
+    // Test database connection
+    await prisma.$queryRaw`SELECT 1`;
+    res.status(200).json({
+      status: 'OK',
+      database: 'connected',
+      timestamp: new Date(),
+      uptime: process.uptime(),
+      environment: process.env.NODE_ENV,
+    });
+  } catch (error) {
+    console.error('Health check failed:', error);
+    res.status(503).json({
+      status: 'ERROR',
+      database: 'disconnected',
+      timestamp: new Date(),
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
 });
 
-// API Routes - Mount all routes
+// Global API Rate Limiter (before routes)
+app.use('/api/', apiLimiter);
+
+// API Routes - Mount all routes with specific rate limiters
+app.use('/api/auth/login', loginLimiter);
+app.use('/api/auth/signup', signupLimiter);
+app.use('/api/auth/forgot-password', forgotPasswordLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productsRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/orders', ordersRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/shipping-rates', shippingRatesRoutes);
-app.use('/api/payment', paymentRoutes);
-app.use('/api/upload', uploadRoutes);
+app.use('/api/payment', paymentLimiter, paymentRoutes);
+app.use('/api/upload', uploadLimiter, uploadRoutes);
 // app.use('/api/email', emailRoutes);
 // app.use('/api/catalogue-pdf', cataloguePdfRoutes);
 // app.use('/api/invoice', invoiceRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/admin', adminLimiter, adminRoutes);
 // app.use('/api/instagram-reels', instagramReelsRoutes);
 // app.use('/api/youtube-shorts', youtubeShortRoutes);
 // app.use('/api/seed-products', seedProductsRoutes);
 app.use('/api/test', testRoutes);
 
-// Error handling middleware - MUST be last
-app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
-  console.error('Express Error Handler triggered:');
-  console.error('  Error:', err);
-  console.error('  Message:', err.message);
-  console.error('  Status:', err.status);
-  console.error('  Path:', req.path);
-  console.error('  Method:', req.method);
+// Error handling middleware - MUST be before Sentry handler
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  logger.error({
+    event: 'unhandled_error',
+    message: err.message,
+    path: req.path,
+    method: req.method,
+    status: err.status || err.statusCode || 500,
+  });
 
   // Always respond with JSON
   const statusCode = err.status || err.statusCode || 500;
@@ -125,7 +188,17 @@ app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
       method: req.method
     } : undefined
   });
+  
+  // Call Sentry if available
+  if (process.env.SENTRY_DSN) {
+    next(err);
+  }
 });
+
+// Sentry error handler (if initialized)
+if (process.env.SENTRY_DSN) {
+  app.use(Sentry.Handlers.errorHandler());
+}
 
 // 404 handler
 app.use((_req: Request, res: Response) => {

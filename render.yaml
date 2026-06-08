@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: ecomzone-web
+    runtime: node
+    buildCommand: npm install && npx prisma generate && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        scope: build
+      - key: JWT_SECRET
+        scope: build
+      - key: JWT_ADMIN_SECRET
+        scope: build
+      - key: ENCRYPTION_KEY
+        scope: build
+      - key: SUPER_ADMIN_PASSWORD
+        scope: build
+    healthCheckPath: /health
+    healthCheckInterval: 60
+    disk:
+      name: uploads
+      mountPath: /opt/render/project/public/uploads
+      sizeGB: 10
