@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
-  url      = env("DATABASE_URL")
+  provider     = "postgresql"
+  url          = env("DATABASE_URL")
+  relationMode = "prisma"
 }
 
 model User {
@@ -42,7 +43,7 @@ model Product {
   weight       Float       @default(0)
   stock         Int
   category      String      @default("general")
-  categories    Json        @default("[]")
+  categories    String[]        @default([])
   subCategory  String?     @default("general")
   isBestseller Boolean     @default(false)
   isNewArrival Boolean     @default(false)

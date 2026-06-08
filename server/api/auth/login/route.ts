@@ -3,19 +3,34 @@ import { encryptPassword, decryptPassword } from '@/lib/encryption';
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { Router, Request, Response } from 'express';
+import { loginSchema } from '@/lib/schemas';
 
 const router = Router();
 
-// Hardcoded super admin credentials (in production, use environment variables)
-const SUPER_ADMIN_EMAIL = "superadmin@ecomzone.com";
-const SUPER_ADMIN_PASSWORD = "SuperAdmin@123";
+// Super admin credentials from environment variables
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL || "superadmin@ecomzone.com";
+const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD;
+
+// Validate required env vars
+if (!SUPER_ADMIN_PASSWORD) {
+  console.warn('⚠️ SUPER_ADMIN_PASSWORD environment variable is not set');
+}
 
 router.post("/", async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    // Validate input
+    const validation = loginSchema.safeParse(req.body);
+    if (!validation.success) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: validation.error.flatten().fieldErrors,
+      });
+    }
+
+    const { email, password } = validation.data;
 
     // Check if it's the super admin
-    if (email === SUPER_ADMIN_EMAIL) {
+    if (email === SUPER_ADMIN_EMAIL && SUPER_ADMIN_PASSWORD) {
       const isPasswordValid = password === SUPER_ADMIN_PASSWORD;
 
       if (!isPasswordValid) {
@@ -42,10 +57,11 @@ router.post("/", async (req: Request, res: Response) => {
         });
       }
 
+      // Access token: 15 minutes
       const token = jwt.sign(
         { userId: superAdmin.id, role: superAdmin.role, isSuperAdmin: true },
         process.env.JWT_SECRET!,
-        { expiresIn: "7d" }
+        { expiresIn: "15m" }
       );
 
       return res.json({
@@ -107,7 +123,7 @@ router.post("/", async (req: Request, res: Response) => {
         permissions: user.permissions || {},
       },
       process.env.JWT_SECRET!,
-      { expiresIn: "7d" }
+      { expiresIn: "15m" }
     );
 
     return res.json({
