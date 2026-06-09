@@ -1,36 +1,56 @@
 import { prisma } from '@/lib/prisma';
 import { encryptPassword } from '@/lib/encryption';
-import { Router, Request, Response } from 'express';
+import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
 
-const router = Router();
+// Helper to get token from Authorization header
+function getTokenFromRequest(request: NextRequest): string | null {
+  const authHeader = request.headers.get("authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+  return authHeader.split(" ")[1];
+}
 
-router.get('/', async (req: Request, res: Response) => {
+// Helper to verify token
+function verifyToken(token: string): any {
   try {
-    const authHeader = req.get("authorization");
-    
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "Unauthorized: No token provided" });
-    }
-
-    const token = authHeader.split(" ")[1];
-    
     if (!process.env.JWT_SECRET) {
       console.error("JWT_SECRET not configured");
-      return res.status(500).json({ message: "Server configuration error" });
+      return null;
+    }
+    return jwt.verify(token, process.env.JWT_SECRET);
+  } catch (error: any) {
+    console.error("JWT verification failed:", error.message);
+    return null;
+  }
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const token = getTokenFromRequest(request);
+    
+    if (!token) {
+      return NextResponse.json(
+        { message: "Unauthorized: No token provided" },
+        { status: 401 }
+      );
     }
 
-    let decoded: any;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (tokenError: any) {
-      console.error("JWT verification failed:", tokenError.message);
-      return res.status(401).json({ message: "Invalid or expired token" });
+    const decoded = verifyToken(token);
+    if (!decoded) {
+      return NextResponse.json(
+        { message: "Invalid or expired token" },
+        { status: 401 }
+      );
     }
 
     // Only super admin can list sub-admins
     if (!decoded.isSuperAdmin) {
-      return res.status(403).json({ message: "Forbidden: Only super admin can access this" });
+      return NextResponse.json(
+        { message: "Forbidden: Only super admin can access this" },
+        { status: 403 }
+      );
     }
 
     const subAdmins = await prisma.user.findMany({
@@ -52,46 +72,51 @@ router.get('/', async (req: Request, res: Response) => {
       },
     });
 
-    return res.json({ subAdmins });
+    return NextResponse.json({ subAdmins });
   } catch (error: any) {
     console.error("Fetch sub-admins error:", error.message, error.stack);
-    return res.status(500).json({ message: "Error fetching sub-admins", error: error.message });
+    return NextResponse.json(
+      { message: "Error fetching sub-admins", error: error.message },
+      { status: 500 }
+    );
   }
-});
+}
 
-router.post('/', async (req: Request, res: Response) => {
+export async function POST(request: NextRequest) {
   try {
-    const authHeader = req.get("authorization");
+    const token = getTokenFromRequest(request);
     
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "Unauthorized: No token provided" });
+    if (!token) {
+      return NextResponse.json(
+        { message: "Unauthorized: No token provided" },
+        { status: 401 }
+      );
     }
 
-    const token = authHeader.split(" ")[1];
-    
-    if (!process.env.JWT_SECRET) {
-      console.error("JWT_SECRET not configured");
-      return res.status(500).json({ message: "Server configuration error" });
-    }
-
-    let decoded: any;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (tokenError: any) {
-      console.error("JWT verification failed:", tokenError.message);
-      return res.status(401).json({ message: "Invalid or expired token" });
+    const decoded = verifyToken(token);
+    if (!decoded) {
+      return NextResponse.json(
+        { message: "Invalid or expired token" },
+        { status: 401 }
+      );
     }
 
     // Only super admin can create sub-admins
     if (!decoded.isSuperAdmin) {
-      return res.status(403).json({ message: "Forbidden: Only super admin can access this" });
+      return NextResponse.json(
+        { message: "Forbidden: Only super admin can access this" },
+        { status: 403 }
+      );
     }
 
-    const { name, email, mobile, password, permissions } = req.body;
+    const { name, email, mobile, password, permissions } = await request.json();
 
     // Validate required fields
     if (!name || !email || !password) {
-      return res.status(400).json({ message: "Name, email, and password are required" });
+      return NextResponse.json(
+        { message: "Name, email, and password are required" },
+        { status: 400 }
+      );
     }
 
     // Check if user already exists
@@ -102,7 +127,10 @@ router.post('/', async (req: Request, res: Response) => {
     });
 
     if (existingUser) {
-      return res.status(400).json({ message: "User with this email or mobile already exists" });
+      return NextResponse.json(
+        { message: "User with this email or mobile already exists" },
+        { status: 400 }
+      );
     }
 
     const hashedPassword = encryptPassword(password);
@@ -120,21 +148,25 @@ router.post('/', async (req: Request, res: Response) => {
       },
     });
 
-    return res.status(201).json({
-      message: "Sub-admin created successfully",
-      subAdmin: {
-        id: subAdmin.id,
-        name: subAdmin.name,
-        email: subAdmin.email,
-        mobile: subAdmin.mobile,
-        isActive: subAdmin.isActive,
-        permissions: subAdmin.permissions,
+    return NextResponse.json(
+      {
+        message: "Sub-admin created successfully",
+        subAdmin: {
+          id: subAdmin.id,
+          name: subAdmin.name,
+          email: subAdmin.email,
+          mobile: subAdmin.mobile,
+          isActive: subAdmin.isActive,
+          permissions: subAdmin.permissions,
+        },
       },
-    });
+      { status: 201 }
+    );
   } catch (error: any) {
     console.error("Create Sub-admin Error:", error.message, error.stack);
-    return res.status(500).json({ message: "Error creating sub-admin", error: error.message });
+    return NextResponse.json(
+      { message: "Error creating sub-admin", error: error.message },
+      { status: 500 }
+    );
   }
-});
-
-export default router;
+}
