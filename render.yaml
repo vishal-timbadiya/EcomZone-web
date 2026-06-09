@@ -7,17 +7,9 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: DATABASE_URL
-        scope: build
-      - key: JWT_SECRET
-        scope: build
-      - key: JWT_ADMIN_SECRET
-        scope: build
-      - key: ENCRYPTION_KEY
-        scope: build
-      - key: SUPER_ADMIN_PASSWORD
-        scope: build
-    healthCheckPath: /health
+      - key: NPM_CONFIG_PRODUCTION
+        value: false
+        healthCheckPath: /health
     healthCheckInterval: 60
     disk:
       name: uploads
