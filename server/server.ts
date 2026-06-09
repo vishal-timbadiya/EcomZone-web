@@ -15,7 +15,6 @@ import {
 import * as Sentry from '@sentry/node';
 
 // import all API routes
-import authRoutes from './api/auth';
 import productsRoutes from './api/products';
 import categoriesRoutes from './api/categories';
 import ordersRoutes from './api/orders';
@@ -161,7 +160,6 @@ app.use('/api/', apiLimiter);
 app.use('/api/auth/login', loginLimiter);
 app.use('/api/auth/signup', signupLimiter);
 app.use('/api/auth/forgot-password', forgotPasswordLimiter);
-app.use('/api/auth', authRoutes);
 app.use('/api/products', productsRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/orders', ordersRoutes);
