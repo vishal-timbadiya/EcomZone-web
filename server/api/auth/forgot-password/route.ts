@@ -1,18 +1,17 @@
 import { prisma } from '@/lib/prisma';
 import crypto from "crypto";
 import nodemailer from "nodemailer";
-import { Router, Request, Response } from 'express';
+import { NextRequest, NextResponse } from 'next/server';
 
-const router = Router();
-
-router.post("/", async (req: Request, res: Response) => {
+export async function POST(request: NextRequest) {
   try {
-    const { email } = req.body;
+    const { email } = await request.json();
 
     if (!email) {
-      return res.status(400).json({
-        message: "Email is required",
-      });
+      return NextResponse.json(
+        { message: "Email is required" },
+        { status: 400 }
+      );
     }
 
     const user = await prisma.user.findUnique({
@@ -21,7 +20,7 @@ router.post("/", async (req: Request, res: Response) => {
 
     if (!user) {
       // Don't reveal if user exists or not for security
-      return res.json({
+      return NextResponse.json({
         message: "If an account exists with this email, you will receive a password reset link.",
       });
     }
@@ -67,15 +66,14 @@ router.post("/", async (req: Request, res: Response) => {
       });
     }
 
-    return res.json({
+    return NextResponse.json({
       message: "If an account exists with this email, you will receive a password reset link.",
     });
   } catch (error: any) {
     console.error("FORGOT PASSWORD ERROR:", error);
-    return res.status(500).json({
-      message: "Something went wrong. Please try again.",
-    });
+    return NextResponse.json(
+      { message: "Something went wrong. Please try again." },
+      { status: 500 }
+    );
   }
-});
-
-export default router;
+}

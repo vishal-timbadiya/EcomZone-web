@@ -2,10 +2,8 @@ import { prisma } from '@/lib/prisma';
 import { encryptPassword, decryptPassword } from '@/lib/encryption';
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { Router, Request, Response } from 'express';
+import { NextRequest, NextResponse } from 'next/server';
 import { loginSchema } from '@/lib/schemas';
-
-const router = Router();
 
 // Super admin credentials from environment variables
 const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL || "superadmin@ecomzone.com";
@@ -16,15 +14,20 @@ if (!SUPER_ADMIN_PASSWORD) {
   console.warn('⚠️ SUPER_ADMIN_PASSWORD environment variable is not set');
 }
 
-router.post("/", async (req: Request, res: Response) => {
+export async function POST(request: NextRequest) {
   try {
+    const body = await request.json();
+
     // Validate input
-    const validation = loginSchema.safeParse(req.body);
+    const validation = loginSchema.safeParse(body);
     if (!validation.success) {
-      return res.status(400).json({
-        error: 'Validation failed',
-        details: validation.error.flatten().fieldErrors,
-      });
+      return NextResponse.json(
+        {
+          error: 'Validation failed',
+          details: validation.error.flatten().fieldErrors,
+        },
+        { status: 400 }
+      );
     }
 
     const { email, password } = validation.data;
@@ -34,9 +37,10 @@ router.post("/", async (req: Request, res: Response) => {
       const isPasswordValid = password === SUPER_ADMIN_PASSWORD;
 
       if (!isPasswordValid) {
-        return res.status(401).json({
-          message: "Invalid credentials",
-        });
+        return NextResponse.json(
+          { message: "Invalid credentials" },
+          { status: 401 }
+        );
       }
 
       // Check if super admin exists in database, if not create
@@ -64,7 +68,7 @@ router.post("/", async (req: Request, res: Response) => {
         { expiresIn: "15m" }
       );
 
-      return res.json({
+      return NextResponse.json({
         message: "Login successful",
         token,
         user: {
@@ -83,16 +87,18 @@ router.post("/", async (req: Request, res: Response) => {
     });
 
     if (!user) {
-      return res.status(404).json({
-        message: "User not found",
-      });
+      return NextResponse.json(
+        { message: "User not found" },
+        { status: 404 }
+      );
     }
 
     // Check if user is active
     if (!user.isActive) {
-      return res.status(403).json({
-        message: "Account is disabled. Contact support.",
-      });
+      return NextResponse.json(
+        { message: "Account is disabled. Contact support." },
+        { status: 403 }
+      );
     }
 
     // Check if password is bcrypt hash (starts with $2)
@@ -110,9 +116,10 @@ router.post("/", async (req: Request, res: Response) => {
     }
 
     if (!isPasswordValid) {
-      return res.status(401).json({
-        message: "Invalid credentials",
-      });
+      return NextResponse.json(
+        { message: "Invalid credentials" },
+        { status: 401 }
+      );
     }
 
     const token = jwt.sign(
@@ -126,7 +133,7 @@ router.post("/", async (req: Request, res: Response) => {
       { expiresIn: "15m" }
     );
 
-    return res.json({
+    return NextResponse.json({
       message: "Login successful",
       token,
       user: {
@@ -141,10 +148,10 @@ router.post("/", async (req: Request, res: Response) => {
       },
     });
   } catch (error: any) {
-    return res.status(500).json({
-      message: "Login failed",
-    });
+    console.error('Login error:', error);
+    return NextResponse.json(
+      { message: "Login failed" },
+      { status: 500 }
+    );
   }
-});
-
-export default router;
+}

@@ -1,40 +1,42 @@
 import { prisma } from '@/lib/prisma';
 import { encryptPassword } from '@/lib/encryption';
-import { Router, Request, Response } from 'express';
+import { NextRequest, NextResponse } from 'next/server';
 
-const router = Router();
-
-router.post('/', async (req: Request, res: Response) => {
+export async function POST(request: NextRequest) {
   try {
-      const { name, email, mobile, password } = req.body;
-  
-      const existingUser = await prisma.user.findFirst({
-        where: {
-          OR: [{ email }, { mobile }],
-        },
-      });
-  
-      if (existingUser) {
-        return res.status(400).json({ message: "User already exists" });
-      }
-  
-      // Store password as encrypted (for security + admin can decrypt)
-      const encryptedPassword = encryptPassword(password);
-  
-      const user = await prisma.user.create({
-        data: {
-          name,
-          email,
-          mobile,
-          password: encryptedPassword,
-        },
-      });
-  
-      return res.json({ message: "User created", user });
-    } catch (error: any) {
-    console.error("Signup Error:", error);
-    return res.status(500).json({ message: "Error creating user", error: error.message });
-  }
-  });
+    const { name, email, mobile, password } = await request.json();
 
-export default router;
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [{ email }, { mobile }],
+      },
+    });
+
+    if (existingUser) {
+      return NextResponse.json(
+        { message: "User already exists" },
+        { status: 400 }
+      );
+    }
+
+    // Store password as encrypted (for security + admin can decrypt)
+    const encryptedPassword = encryptPassword(password);
+
+    const user = await prisma.user.create({
+      data: {
+        name,
+        email,
+        mobile,
+        password: encryptedPassword,
+      },
+    });
+
+    return NextResponse.json({ message: "User created", user });
+  } catch (error: any) {
+    console.error("Signup Error:", error);
+    return NextResponse.json(
+      { message: "Error creating user", error: error.message },
+      { status: 500 }
+    );
+  }
+}
