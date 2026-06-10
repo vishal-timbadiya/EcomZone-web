@@ -1,4 +1,4 @@
-import { prisma } from '../../lib/prisma';
+import { prisma } from '../../../lib/prisma';
 import { Router, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 
@@ -45,5 +45,6 @@ router.get('/', async (req: Request, res: Response) => {
   });
 
 export default router;
+
 
 

@@ -1,4 +1,4 @@
-import { prisma } from '../../lib/prisma';
+import { prisma } from '../../../lib/prisma';
 import { requireAdmin } from '@/lib/middleware';
 import { Router, Request, Response } from 'express';
 
@@ -34,5 +34,6 @@ router.patch('/', async (req: Request, res: Response) => {
   });
 
 export default router;
+
 
 
