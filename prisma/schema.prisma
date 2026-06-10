@@ -5,6 +5,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -49,159 +50,28 @@ model Product {
   isTopRanking Boolean     @default(false)
   isActive      Boolean     @default(true)
   createdAt     DateTime    @default(now())
-  orderItems    OrderItem[]
+
+  orders Order[]
+  orderItems OrderItem[]
 }
 
-
 model Order {
-  id      String @id @default(uuid())
-  orderId String @unique
-
-  userId String
-  user   User   @relation(fields: [userId], references: [id])
-
-  subtotal       Float
-  gstAmount      Float
-  shippingCharge Float @default(0)
-  totalWeight   Float @default(0)
-  totalAmount   Float
-
-  paymentMode   PaymentMode
-  paymentStatus PaymentStatus @default(PENDING)
-
-  orderStatus OrderStatus @default(CONFIRMED)
-
-  courierName String?
-  trackingId  String?
-
-  shippingAddress Json?
-  billingAddress Json?
-  gstDetails      Json?
-
-  pdfGeneratedAt DateTime?
-  pdfSerialNumber Int?
-
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  items     OrderItem[]
+  total     Float
+  status    String   @default("pending")
   createdAt DateTime @default(now())
-
-  items OrderItem[]
 }
 
 model OrderItem {
-  id        String  @id @default(uuid())
-  order     Order   @relation(fields: [orderId], references: [id])
+  id        String   @id @default(uuid())
   orderId   String
-  product   Product @relation(fields: [productId], references: [id])
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productId String
+  product   Product  @relation(fields: [productId], references: [id])
   quantity  Int
   price     Float
-}
-
-model Settings {
-  id         String   @id @default(uuid())
-  codEnabled Boolean  @default(true)
-  upiEnabled Boolean  @default(true)
-  createdAt  DateTime @default(now())
-}
-
-model Category {
-  id        String   @id @default(uuid())
-  name      String
-  slug      String   @unique
-  icon      String   @default("📦")
-  imageUrl  String?  @default("")
-  position  Int      @default(0)
-  isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
-}
-
-enum Role {
-  ADMIN
-  CUSTOMER
-}
-
-enum PaymentMode {
-  COD
-  UPI
-  PHONEPE
-}
-
-enum PaymentStatus {
-  PENDING
-  SUCCESS
-  FAILED
-}
-
-enum OrderStatus {
-  CONFIRMED
-  PACKED
-  DISPATCHED
-  DELIVERED
-  CANCELLED
-}
-
-// ============================================
-// Learning Activity Tracker Models
-// ============================================
-
-model LearningModule {
-  id          String   @id @default(uuid())
-  name        String
-  description String   @db.Text
-  category    String
-  icon        String   @default("📚")
-  order       Int      @default(0)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-
-  progress LearningProgress[]
-  sessions StudySession[]
-}
-
-model LearningProgress {
-  id                String         @id @default(uuid())
-  moduleId          String
-  module            LearningModule @relation(fields: [moduleId], references: [id])
-  status            ProgressStatus @default(NOT_STARTED)
-  progressPercentage Int           @default(0)
-  notes             String         @db.Text @default("")
-  completedAt       DateTime?
-  updatedAt         DateTime       @default(now())
-
-  @@unique([moduleId])
-}
-
-model StudySession {
-  id        String         @id @default(uuid())
-  moduleId  String
-  module    LearningModule @relation(fields: [moduleId], references: [id])
-  duration  Int
-  notes     String         @db.Text @default("")
-  sessionType SessionType @default(THEORY)
-  date      DateTime       @default(now())
-  createdAt DateTime       @default(now())
-}
-
-enum ProgressStatus {
-  NOT_STARTED
-  IN_PROGRESS
-  COMPLETED
-}
-
-enum SessionType {
-  THEORY
-  PRACTICE
-  PROJECT
-}
-
-// Shipping Rates Model
-model ShippingRate {
-  id        String   @id @default(uuid())
-  state     String
-  city      String?
-  ratePerKg Float
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([state, city])
 }
