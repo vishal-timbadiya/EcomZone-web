@@ -11,3 +11,4 @@ router.use('/update/:id', categoriesUpdateRouter);
 router.use('/:slug', categoriesSlugRouter);
 
 export default router;
+

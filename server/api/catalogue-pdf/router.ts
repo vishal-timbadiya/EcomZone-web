@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/server/lib/prisma';
 import { PDFDocument, rgb } from 'pdf-lib';
 
 // Pre-fetch all images before PDF generation
@@ -321,3 +321,4 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 export default router;
+

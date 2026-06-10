@@ -6,3 +6,4 @@ const router = Router();
 router.use("/", categoriesRouter);
 
 export default router;
+

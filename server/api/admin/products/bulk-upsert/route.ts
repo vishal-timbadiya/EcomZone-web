@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/server/lib/prisma';
 import { verifyAdmin } from '@/lib/adminAuth';
 import { Router, Request, Response } from 'express';
 
@@ -145,3 +145,4 @@ router.post('/', async (req: Request, res: Response) => {
   });
 
 export default router;
+

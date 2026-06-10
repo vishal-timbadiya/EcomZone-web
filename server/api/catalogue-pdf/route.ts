@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/server/lib/prisma';
 import { PDFDocument, rgb } from 'pdf-lib';
 import { Router, Request, Response } from 'express';
 
@@ -289,3 +289,4 @@ router.get('/', async (req: Request, res: Response) => {
   });
 
 export default router;
+

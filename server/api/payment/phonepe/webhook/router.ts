@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { prisma } from "@/lib/prisma";
+import { prisma } from '@/server/lib/prisma';
 import { PaymentStatus } from "@prisma/client";
 
 const router = Router();
@@ -48,3 +48,4 @@ router.post("/", async (req, res) => {
 });
 
 export default router;
+

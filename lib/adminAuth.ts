@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import { prisma } from "./prisma";
+import { prisma } from "@/server/lib/prisma";
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 

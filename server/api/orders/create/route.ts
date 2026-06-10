@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/server/lib/prisma';
 import jwt from "jsonwebtoken";
 import nodemailer from "nodemailer";
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
@@ -575,3 +575,4 @@ router.post("/", async (req: Request, res: Response) => {
 });
 
 export default router;
+

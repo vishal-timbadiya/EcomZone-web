@@ -6,3 +6,4 @@ const router = Router();
 router.use("/send", emailSendRouter);
 
 export default router;
+

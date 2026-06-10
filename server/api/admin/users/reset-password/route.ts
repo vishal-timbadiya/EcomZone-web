@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/server/lib/prisma';
 import { encryptPassword } from '@/lib/encryption';
 import jwt from "jsonwebtoken";
 import { Router, Request, Response } from 'express';
@@ -58,3 +58,4 @@ router.post("/:id", async (req: Request, res: Response) => {
 });
 
 export default router;
+

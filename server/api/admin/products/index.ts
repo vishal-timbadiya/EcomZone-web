@@ -28,3 +28,4 @@ router.use('/:id/toggle', productsIdToggleRouter);
 router.use('/:id', productsIdRouter);
 
 export default router;
+

@@ -8,3 +8,4 @@ router.use("/", productsRouter);
 router.use("/:slug", slugRouter);
 
 export default router;
+

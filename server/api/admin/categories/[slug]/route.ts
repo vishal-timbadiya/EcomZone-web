@@ -1,6 +1,6 @@
 import { verifyAdmin } from '@/lib/adminAuth';
 import { Router, Request, Response } from 'express';
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/server/lib/prisma';
 
 const router = Router({ mergeParams: true });
 

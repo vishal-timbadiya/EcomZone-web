@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/server/lib/prisma';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { Router, Request, Response } from 'express';
 

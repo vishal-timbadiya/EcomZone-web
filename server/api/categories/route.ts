@@ -147,3 +147,4 @@ router.get("/:slug", async (req, res) => {
 });
 
 export default router;
+

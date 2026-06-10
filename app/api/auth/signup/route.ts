@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/server/lib/prisma';
 import { encryptPassword } from '@/lib/encryption';
 import { NextRequest, NextResponse } from 'next/server';
 

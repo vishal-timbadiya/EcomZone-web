@@ -6,3 +6,4 @@ const router = Router();
 router.use("/", uploadRouter);
 
 export default router;
+

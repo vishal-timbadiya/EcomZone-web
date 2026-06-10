@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+import { prisma } from '@/server/lib/prisma';
 import jwt from 'jsonwebtoken';
 
 // Helper to extract token from Authorization header

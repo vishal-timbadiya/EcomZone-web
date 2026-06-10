@@ -6,3 +6,4 @@ const router = Router();
 router.use("/", instagramRouter);
 
 export default router;
+
