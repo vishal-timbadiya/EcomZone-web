@@ -1,4 +1,4 @@
-import { prisma } from '@/server/lib/prisma';
+import { prisma } from '../../lib/prisma';
 import { Router, Request, Response } from 'express';
 
 const router = Router();
@@ -76,4 +76,5 @@ router.get('/', async (req: Request, res: Response) => {
   });
 
 export default router;
+
 

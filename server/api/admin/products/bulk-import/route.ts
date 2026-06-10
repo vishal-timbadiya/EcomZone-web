@@ -1,4 +1,4 @@
-import { prisma } from '@/server/lib/prisma';
+import { prisma } from '../../lib/prisma';
 import { parse } from 'csv-parse/sync';
 import { verifyAdmin } from '@/lib/adminAuth';
 import { Router, Request, Response } from 'express';
@@ -263,4 +263,5 @@ router.post('/', upload.single('file'), handleMulterError, async (req: Request, 
 });
 
 export default router;
+
 
