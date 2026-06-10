@@ -6,8 +6,8 @@ const globalForPrisma = global as unknown as {
 
 let prismaInstance: PrismaClient | undefined;
 
-// Only instantiate Prisma if DATABASE_URL is available
-if (process.env.DATABASE_URL) {
+// Initialize Prisma Client
+if (!prismaInstance) {
   prismaInstance =
     globalForPrisma.prisma ||
     new PrismaClient({
@@ -22,23 +22,9 @@ if (process.env.DATABASE_URL) {
   }
 }
 
-export const prisma = prismaInstance as PrismaClient;
+export const prisma = prismaInstance;
 
-// Export a getter function for lazy initialization
-export function getPrisma(): PrismaClient {
-  if (!prismaInstance) {
-    if (!process.env.DATABASE_URL) {
-      throw new Error("DATABASE_URL environment variable is not set");
-    }
-    prismaInstance = new PrismaClient({
-      log:
-        process.env.NODE_ENV === "development"
-          ? ["query", "error", "warn"]
-          : ["error"],
-    });
-    if (process.env.NODE_ENV !== "production") {
-      globalForPrisma.prisma = prismaInstance;
-    }
-  }
-  return prismaInstance;
-}
+// Disconnect on process exit
+process.on("exit", async () => {
+  await prisma?.$disconnect();
+});
