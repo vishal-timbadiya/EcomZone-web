@@ -1,4 +1,4 @@
-import { prisma } from '../../../lib/prisma';
+import { prisma } from "../../../../lib/prisma";
 import { encryptPassword } from '@/lib/encryption';
 import jwt from "jsonwebtoken";
 import { Router, Request, Response } from 'express';

@@ -1,4 +1,4 @@
-import { prisma } from '../../../lib/prisma';
+import { prisma } from "../../../../lib/prisma";
 import { PaymentStatus } from '@prisma/client';
 import { Router, Request, Response } from 'express';
 
