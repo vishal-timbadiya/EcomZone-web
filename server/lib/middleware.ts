@@ -1,5 +1,5 @@
 import { Request } from 'express';
-import { verifyToken } from "@/lib/auth";
+import { verifyToken } from "../../lib/auth";
 
 type AuthResult =
   | { user: any }

@@ -1,6 +1,6 @@
 import { prisma } from '../../../lib/prisma';
-import { decryptPassword, encryptPassword } from '@/lib/encryption';
-import { verifyAdmin } from '@/lib/adminAuth';
+import { decryptPassword, encryptPassword } from '../../../lib/encryption';
+import { verifyAdmin } from '../../../lib/adminAuth';
 import { Router, Request, Response } from 'express';
 
 const router = Router();

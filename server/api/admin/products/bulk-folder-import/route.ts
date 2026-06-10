@@ -1,8 +1,8 @@
-import { verifyAdmin } from '@/lib/adminAuth';
+import { verifyAdmin } from '../../../lib/adminAuth';
 import { writeFile, mkdir, readdir, unlink, readFile, rm } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { csvStorage } from '@/lib/csvStorage';
+import { csvStorage } from '../../../lib/csvStorage';
 import { Router, Request, Response } from 'express';
 import AdmZip from 'adm-zip';
 import { parse } from 'csv-parse/sync';

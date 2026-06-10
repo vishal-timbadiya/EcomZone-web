@@ -1,6 +1,6 @@
 import { prisma } from '../../../../lib/prisma';
 import { parse } from 'csv-parse/sync';
-import { verifyAdmin } from '@/lib/adminAuth';
+import { verifyAdmin } from '../../../lib/adminAuth';
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';

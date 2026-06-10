@@ -1,4 +1,4 @@
-import { verifyAdmin } from '@/lib/adminAuth';
+import { verifyAdmin } from '../../../lib/adminAuth';
 import { prisma } from '../../../../lib/prisma';
 import { Router, Request, Response } from 'express';
 
