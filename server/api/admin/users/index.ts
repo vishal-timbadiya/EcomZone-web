@@ -7,7 +7,10 @@ const router = Router();
 
 router.use('/', usersRouter);
 
-router.use('/reset-password/:id', usersResetPasswordRouter);
+// Mounted WITHOUT the :id segment - the router itself handles '/:id'. Mounting
+// at '/reset-password/:id' made the real path '/reset-password/:id/:id', so the
+// endpoint was unreachable and always 404'd.
+router.use('/reset-password', usersResetPasswordRouter);
 router.use('/:id', usersIdRouter);
 
 export default router;

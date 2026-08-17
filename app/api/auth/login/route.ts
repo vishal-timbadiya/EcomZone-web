@@ -1,20 +1,14 @@
-import { prisma } from '@/server/lib/prisma';
-import { encryptPassword, decryptPassword } from '@/lib/encryption';
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/server/lib/prisma';
+import { hashPassword, verifyPassword } from '@/lib/password';
+import { signAuthToken } from '@/lib/jwt';
 import { loginSchema } from '@/lib/schemas';
-
-// Super admin credentials from environment variables
-const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL || "superadmin@ecomzone.com";
-const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD;
-
-// Validate required env vars
-if (!SUPER_ADMIN_PASSWORD) {
-  console.warn('⚠️ SUPER_ADMIN_PASSWORD environment variable is not set');
-}
+import { enforceRateLimit, LOGIN_LIMIT } from '@/lib/rateLimit';
 
 export async function POST(request: NextRequest) {
+  const limited = enforceRateLimit(request, LOGIN_LIMIT);
+  if (limited) return limited;
+
   try {
     const body = await request.json();
 
@@ -32,109 +26,58 @@ export async function POST(request: NextRequest) {
 
     const { email, password } = validation.data;
 
-    // Check if it's the super admin
-    if (email === SUPER_ADMIN_EMAIL && SUPER_ADMIN_PASSWORD) {
-      const isPasswordValid = password === SUPER_ADMIN_PASSWORD;
-
-      if (!isPasswordValid) {
-        return NextResponse.json(
-          { message: "Invalid credentials" },
-          { status: 401 }
-        );
-      }
-
-      // Check if super admin exists in database, if not create
-      let superAdmin = await prisma.user.findUnique({
-        where: { email },
-      });
-
-      if (!superAdmin) {
-        superAdmin = await prisma.user.create({
-          data: {
-            name: "Super Admin",
-            email,
-            mobile: "0000000000",
-            password: encryptPassword(SUPER_ADMIN_PASSWORD),
-            role: "ADMIN",
-            isSuperAdmin: true,
-          },
-        });
-      }
-
-      // Access token: 15 minutes
-      const token = jwt.sign(
-        { userId: superAdmin.id, role: superAdmin.role, isSuperAdmin: true },
-        process.env.JWT_SECRET!,
-        { expiresIn: "15m" }
-      );
-
-      return NextResponse.json({
-        message: "Login successful",
-        token,
-        user: {
-          id: superAdmin.id,
-          name: superAdmin.name,
-          email: superAdmin.email,
-          role: superAdmin.role,
-          isSuperAdmin: true,
-        },
-      });
-    }
-
-    // Regular user login (customer, admin, or sub-admin)
     const user = await prisma.user.findUnique({
       where: { email },
     });
 
+    // Uniform response for "no such user" and "wrong password" so the endpoint
+    // cannot be used to enumerate which email addresses have accounts.
     if (!user) {
       return NextResponse.json(
-        { message: "User not found" },
-        { status: 404 }
+        { message: 'Invalid credentials' },
+        { status: 401 }
       );
     }
 
     // Check if user is active
     if (!user.isActive) {
       return NextResponse.json(
-        { message: "Account is disabled. Contact support." },
+        { message: 'Account is disabled. Contact support.' },
         { status: 403 }
       );
     }
 
-    // Check if password is bcrypt hash (starts with $2)
-    const isBcrypt = user.password.startsWith("$2");
+    const { valid, needsRehash } = await verifyPassword(password, user.password);
 
-    let isPasswordValid = false;
-
-    if (isBcrypt) {
-      // Use bcrypt comparison for bcrypt-hashed passwords
-      isPasswordValid = await bcrypt.compare(password, user.password);
-    } else {
-      // Use CryptoJS decryption for AES-encrypted passwords
-      const decryptedPassword = decryptPassword(user.password);
-      isPasswordValid = password === decryptedPassword;
-    }
-
-    if (!isPasswordValid) {
+    if (!valid) {
       return NextResponse.json(
-        { message: "Invalid credentials" },
+        { message: 'Invalid credentials' },
         { status: 401 }
       );
     }
 
-    const token = jwt.sign(
-      {
-        userId: user.id,
-        role: user.role,
-        isSuperAdmin: user.isSuperAdmin || false,
-        permissions: user.permissions || {},
-      },
-      process.env.JWT_SECRET!,
-      { expiresIn: "15m" }
-    );
+    // Transparently upgrade legacy AES credentials to bcrypt on successful login.
+    if (needsRehash) {
+      try {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { password: await hashPassword(password) },
+        });
+      } catch (rehashError) {
+        // A failed upgrade must not block a valid login; the next attempt retries.
+        console.error('Password rehash failed for user', user.id, rehashError);
+      }
+    }
+
+    const token = signAuthToken({
+      userId: user.id,
+      role: user.role,
+      isSuperAdmin: user.isSuperAdmin || false,
+      permissions: (user.permissions as Record<string, boolean>) || {},
+    });
 
     return NextResponse.json({
-      message: "Login successful",
+      message: 'Login successful',
       token,
       user: {
         id: user.id,
@@ -147,10 +90,10 @@ export async function POST(request: NextRequest) {
         permissions: user.permissions || {},
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Login error:', error);
     return NextResponse.json(
-      { message: "Login failed" },
+      { message: 'Login failed' },
       { status: 500 }
     );
   }

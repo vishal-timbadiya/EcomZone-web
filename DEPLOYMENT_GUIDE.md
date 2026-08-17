@@ -1,259 +1,314 @@
-═══════════════════════════════════════════════════════════════════════════════════
-                    DEPLOYMENT GUIDE - VERCEL & RENDER
-═══════════════════════════════════════════════════════════════════════════════════
+# Deployment Guide — ecomzone.in on Hostinger
 
-This guide explains how to deploy EcomZone to:
-  - Frontend: Vercel (Next.js hosting)
-  - Backend: Render (Node.js hosting)
+EcomZone is a **Node.js application**, not static files or PHP. Next.js runs in
+server mode with a custom Express server, so it needs a persistent Node process.
 
-═══════════════════════════════════════════════════════════════════════════════════
+> **This will not run on Hostinger shared/Premium/Business web hosting.**
+> Those plans serve PHP and static files only — there is no way to keep a Node
+> process alive. You need **Hostinger VPS** (any KVM plan). If you are currently
+> on a shared plan, upgrade before continuing.
 
-PART 1: DEPLOY BACKEND TO RENDER
-═══════════════════════════════════════════════════════════════════════════════════
+Target: `https://ecomzone.in`
 
-Step 1: Prepare Your Render Account
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+---
 
-1. Go to https://render.com
-2. Sign up with GitHub (easier for deployment)
-3. Connect your GitHub account
+## 1. Prerequisites
 
-Step 2: Create PostgreSQL Database on Render
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Hostinger VPS (Ubuntu 22.04 or 24.04), root SSH access
+- The domain `ecomzone.in` with DNS managed at Hostinger
+- A PostgreSQL database (either on the same VPS, or Hostinger/Neon/Supabase managed)
+- Razorpay live API keys
 
-1. Go to Render Dashboard (https://dashboard.render.com)
-2. Click "+ New" → "PostgreSQL"
-3. Fill in details:
-   Name: ecomzone_db
-   Database: ecomzone
-   User: postgres (or custom)
-   Region: Choose closest to you
-   Version: 14 or higher
-4. Click "Create Database"
-5. ⚠️ IMPORTANT: Save the "Internal Database URL" - you'll need it!
-   Format: postgresql://user:password@host:port/database
+---
 
-Step 3: Deploy Backend Service
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## 2. Point the domain at the VPS
 
-1. Go to Render Dashboard
-2. Click "+ New" → "Web Service"
-3. Connect to your GitHub repository (ecomzone)
-4. Fill in details:
-   Name:              ecomzone-backend
-   Environment:       Node
-   Build Command:     npm install && npm run build && npx prisma generate
-   Start Command:     npm run start
-   Plan:              Free (or Starter if you want)
-   Region:            Choose same as database
-   Root Directory:    backend
-   
-5. Click "Advanced" and add Environment Variables:
-   
-   NODE_ENV=production
-   PORT=3001
-   DATABASE_URL=[Paste the Internal Database URL from Step 2]
-   JWT_SECRET=generate-a-random-string-here
-   FRONTEND_URL=https://ecomzone.vercel.app (update later with your Vercel URL)
-   
-   TIP: Generate JWT_SECRET with: openssl rand -hex 32
-        Or just use any long random string like: a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
+In **hPanel → Domains → DNS Zone** for `ecomzone.in`, set:
 
-6. Click "Deploy Web Service"
-7. Wait 3-5 minutes for deployment
-8. Once complete, you'll see a URL like: https://ecomzone-backend-xxxx.onrender.com
-9. ⚠️ SAVE THIS URL - you need it for the frontend!
+| Type | Name  | Value              | TTL  |
+| ---- | ----- | ------------------ | ---- |
+| A    | `@`   | *your VPS IPv4*    | 3600 |
+| A    | `www` | *your VPS IPv4*    | 3600 |
 
-Step 4: Verify Backend Deployment
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Remove conflicting A/CNAME records for `@` and `www`. DNS takes up to an hour.
 
-Test the health endpoint:
-  https://ecomzone-backend-xxxx.onrender.com/health
-  
-Expected response:
-  {
-    "status": "Backend server is running",
-    "timestamp": "2024-01-20T10:30:00.000Z"
-  }
+---
 
-═══════════════════════════════════════════════════════════════════════════════════
+## 3. Prepare the server
 
-PART 2: DEPLOY FRONTEND TO VERCEL
-═══════════════════════════════════════════════════════════════════════════════════
+SSH in as root, then:
 
-Step 1: Prepare Your Vercel Account
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```bash
+apt update && apt upgrade -y
 
-1. Go to https://vercel.com
-2. Sign up with GitHub
-3. Import Project → Select "ecomzone" repository
-4. Choose "Next.js" framework (auto-detected)
+# Node.js 20 LTS (Next 16 requires >= 20; the old vercel.json pinned 18, which is too old)
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt install -y nodejs git nginx postgresql postgresql-contrib
+npm install -g pm2
 
-Step 2: Configure Environment Variables
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+node -v   # expect v20.x
+```
 
-In Vercel Dashboard → Settings → Environment Variables, add:
+Create a non-root user to run the app:
 
-NEXT_PUBLIC_BACKEND_URL=https://ecomzone-backend-xxxx.onrender.com
-NEXT_PUBLIC_API_URL=https://ecomzone-backend-xxxx.onrender.com/api
+```bash
+adduser --disabled-password --gecos "" ecomzone
+usermod -aG www-data ecomzone
+```
 
-(Replace with your actual Render backend URL from Step 3.9)
+---
 
-Step 3: Deploy Frontend
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## 4. Create the database
 
-1. In Vercel, click "Deploy"
-2. Select root directory: frontend
-3. Configure project:
-   Framework: Next.js
-   Build Command: npm run build
-   Output Directory: .next
-4. Click "Deploy"
-5. Wait 2-3 minutes
-6. You'll get a URL like: https://ecomzone-xxxx.vercel.app
-7. ⚠️ SAVE THIS URL - you need it for the backend!
+Skip if you are using a managed database — just keep its connection string.
 
-Step 4: Update Backend with Frontend URL
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```bash
+sudo -u postgres psql
+```
 
-Go back to Render Dashboard:
-1. Click on your backend service
-2. Go to Settings → Environment
-3. Find FRONTEND_URL variable
-4. Update to: https://ecomzone-xxxx.vercel.app
-5. Click "Save"
-6. The service will automatically redeploy
+```sql
+CREATE DATABASE ecomzone;
+CREATE USER ecomzone_user WITH ENCRYPTED PASSWORD 'use-a-long-random-password';
+GRANT ALL PRIVILEGES ON DATABASE ecomzone TO ecomzone_user;
+\c ecomzone
+GRANT ALL ON SCHEMA public TO ecomzone_user;
+\q
+```
 
-Step 5: Verify Frontend Deployment
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Connection string:
 
-1. Open: https://ecomzone-xxxx.vercel.app
-2. Check browser console (F12) for errors
-3. Try making an API call to verify backend connection
-4. If you see CORS errors, the FRONTEND_URL wasn't updated properly
+```
+postgresql://ecomzone_user:use-a-long-random-password@localhost:5432/ecomzone?schema=public
+```
 
-═══════════════════════════════════════════════════════════════════════════════════
+---
 
-PART 3: CONNECT DATABASE TO BACKEND
-═══════════════════════════════════════════════════════════════════════════════════
+## 5. Deploy the code
 
-The database is created but migrations need to run:
+```bash
+su - ecomzone
+git clone <your-repo-url> ~/app
+cd ~/app
+git checkout New          # or main, once merged
+npm ci
+```
 
-Option 1: Run Migrations Manually (Recommended)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Create `.env` (see `.env.example` for the full list):
 
-1. In your local machine, go to backend folder:
-   cd d:\ecomzone_V2\backend
+```bash
+nano ~/app/.env
+```
 
-2. Set your production database URL:
-   $env:DATABASE_URL = "postgresql://user:password@host:port/ecomzone"
+```ini
+DATABASE_URL="postgresql://ecomzone_user:...@localhost:5432/ecomzone?schema=public"
 
-3. Run migrations:
-   npx prisma migrate deploy
+# Must be >= 32 random chars or the server refuses to boot.
+# Generate: node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+JWT_SECRET="<paste generated value>"
+JWT_EXPIRES_IN=7d
 
-4. This creates all tables in your Render database
+NODE_ENV=production
+PORT=3000
+TRUST_PROXY_HOPS=1
 
-Option 2: Use Render Deployment Build
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FRONTEND_URL=https://ecomzone.in
+NEXT_PUBLIC_API_URL=https://ecomzone.in/api
+NEXT_PUBLIC_BACKEND_URL=https://ecomzone.in
+NEXT_PUBLIC_SITE_URL=https://ecomzone.in
+NEXT_PUBLIC_APP_URL=https://ecomzone.in
+NEXT_PUBLIC_APP_NAME=EcomZone
 
-The build command already includes:
-  npx prisma generate
+RAZORPAY_KEY_ID=rzp_live_xxxxxxxx
+RAZORPAY_KEY_SECRET=xxxxxxxx
+RAZORPAY_WEBHOOK_SECRET=xxxxxxxx
 
-So migrations might auto-run during deployment.
-Check Render's deployment logs to confirm.
+EMAIL_USER=you@gmail.com
+EMAIL_PASS=<gmail app password>
 
-═══════════════════════════════════════════════════════════════════════════════════
+# Only needed if accounts created before the bcrypt migration still exist.
+ENCRYPTION_KEY=<the old value, or blank>
+```
 
-TROUBLESHOOTING
-═══════════════════════════════════════════════════════════════════════════════════
+Lock it down — it holds live payment keys:
 
-Frontend Issues:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```bash
+chmod 600 ~/app/.env
+```
 
-Issue: "Can't connect to backend" (404 errors)
-Solution:
-  1. Check NEXT_PUBLIC_BACKEND_URL in Vercel settings
-  2. Verify Render backend is running (check status)
-  3. Try accessing backend health endpoint directly
+Apply the schema, seed the admin, and build:
 
-Issue: Blank page after deployment
-Solution:
-  1. Check Vercel build logs
-  2. Ensure "frontend" is the root directory
-  3. Check for TypeScript errors
+```bash
+cd ~/app
+npx prisma db push
+SUPER_ADMIN_EMAIL=you@example.com SUPER_ADMIN_PASSWORD='a-long-strong-password' npm run db:seed-admin
+npm run build
+```
 
-Backend Issues:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`db push` adds the new `razorpayOrderId` / `razorpayPaymentId` columns, the
+`updatedAt` column, and the indexes. It preserves existing data.
 
-Issue: "Error: Can't connect to database"
-Solution:
-  1. Verify DATABASE_URL is correct in Render settings
-  2. Check PostgreSQL service status on Render
-  3. Try connection string in Prisma Studio locally
+---
 
-Issue: Deployment fails with "Prisma" errors
-Solution:
-  1. Ensure build command includes: npx prisma generate
-  2. Run locally: npm run build
-  3. Check TypeScript compilation
+## 6. Run it under PM2
 
-CORS Errors:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```bash
+cd ~/app
+pm2 start npm --name ecomzone -- start
+pm2 save
+pm2 startup systemd -u ecomzone --hp /home/ecomzone
+# run the command it prints, as root
+```
 
-Issue: CORS errors when frontend calls backend
-Solution:
-  1. Check FRONTEND_URL is set in backend .env
-  2. Verify NEXT_PUBLIC_BACKEND_URL in frontend .env
-  3. Restart backend service on Render
-  4. Clear browser cache (Ctrl+Shift+Delete)
+Check it came up:
 
-═══════════════════════════════════════════════════════════════════════════════════
+```bash
+pm2 logs ecomzone --lines 40
+curl -s localhost:3000/health
+```
 
-USEFUL LINKS
-═══════════════════════════════════════════════════════════════════════════════════
+`/health` should report `"database":"connected"`. If the process exits at boot
+with a message about `JWT_SECRET`, the secret is missing or too short — that
+check is deliberate.
 
-Render:
-  - Dashboard: https://dashboard.render.com
-  - Docs: https://render.com/docs
-  - PostgreSQL Docs: https://render.com/docs/databases
+---
 
-Vercel:
-  - Dashboard: https://vercel.com/dashboard
-  - Docs: https://vercel.com/docs
-  - Next.js Deployment: https://nextjs.org/docs/deployment/vercel
+## 7. Nginx reverse proxy
 
-Prisma:
-  - Studio: npx prisma studio
-  - Docs: https://www.prisma.io/docs/
+```bash
+exit   # back to root
+nano /etc/nginx/sites-available/ecomzone
+```
 
-═══════════════════════════════════════════════════════════════════════════════════
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ecomzone.in www.ecomzone.in;
 
-QUICK CHECKLIST
-═══════════════════════════════════════════════════════════════════════════════════
+    # Bulk product/ZIP imports need a large body.
+    client_max_body_size 120M;
 
-Backend (Render):
-  ☐ GitHub account connected to Render
-  ☐ PostgreSQL database created on Render
-  ☐ Backend service created and deployed
-  ☐ Environment variables set correctly
-  ☐ Health endpoint responds
-  ☐ Database migrations run
-  ☐ Backend URL saved
+    location / {
+        proxy_pass         http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade $http_upgrade;
+        proxy_set_header   Connection 'upgrade';
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 300s;
+    }
+}
+```
 
-Frontend (Vercel):
-  ☐ GitHub account connected to Vercel
-  ☐ Project imported from GitHub
-  ☐ Environment variables set (BACKEND_URL, API_URL)
-  ☐ Frontend deployed successfully
-  ☐ Can open in browser
-  ☐ No console errors
-  ☐ Frontend URL saved
+`X-Forwarded-For` matters: rate limiting keys on the client IP, and the app
+trusts exactly `TRUST_PROXY_HOPS` (1) proxies. Get this wrong and every visitor
+shares one rate-limit bucket.
 
-Integration:
-  ☐ Update backend FRONTEND_URL with actual Vercel URL
-  ☐ Test API calls from frontend to backend
-  ☐ Check CORS headers
-  ☐ Verify authentication works
-  ☐ Test file uploads/downloads
+```bash
+ln -s /etc/nginx/sites-available/ecomzone /etc/nginx/sites-enabled/
+rm -f /etc/nginx/sites-enabled/default
+nginx -t && systemctl reload nginx
+```
 
-═══════════════════════════════════════════════════════════════════════════════════
+---
+
+## 8. HTTPS
+
+```bash
+apt install -y certbot python3-certbot-nginx
+certbot --nginx -d ecomzone.in -d www.ecomzone.in
+```
+
+Choose redirect HTTP → HTTPS. Certbot installs a renewal timer automatically;
+confirm with `certbot renew --dry-run`.
+
+---
+
+## 9. Firewall
+
+```bash
+ufw allow OpenSSH
+ufw allow 'Nginx Full'
+ufw enable
+```
+
+Postgres stays on `localhost` and must **not** be exposed.
+
+---
+
+## 10. Razorpay webhook
+
+At *dashboard.razorpay.com → Settings → Webhooks → Add New Webhook*:
+
+- **URL**: `https://ecomzone.in/api/payment/razorpay/webhook`
+- **Secret**: the same value as `RAZORPAY_WEBHOOK_SECRET`
+- **Events**: `payment.captured`, `payment.failed`, `order.paid`
+
+Verify with a live test order. The webhook must return 200; a signature mismatch
+returns 400 and Razorpay will show the delivery as failed.
+
+---
+
+## 11. Post-deploy checks
+
+```bash
+curl -s https://ecomzone.in/health
+curl -s -o /dev/null -w '%{http_code}\n' https://ecomzone.in/api/products          # 200
+curl -s -o /dev/null -w '%{http_code}\n' https://ecomzone.in/api/admin/users       # 401
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://ecomzone.in/api/upload    # 401
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  -H 'Content-Type: application/json' -d '{}' \
+  https://ecomzone.in/api/payment/razorpay/webhook                                 # 400
+```
+
+Then in a browser: sign in, place a COD order, place a Razorpay order, and
+confirm both appear under `/admin/orders` with the right payment status.
+
+---
+
+## 12. Updating
+
+```bash
+su - ecomzone
+cd ~/app
+git pull
+npm ci
+npx prisma db push      # only when the schema changed
+npm run build
+pm2 restart ecomzone
+```
+
+---
+
+## Uploads and backups
+
+Product images are written to `~/app/public/uploads` on the VPS disk. They are
+not in git, so back them up along with the database:
+
+```bash
+# database
+pg_dump -U ecomzone_user ecomzone | gzip > ~/backup-$(date +%F).sql.gz
+
+# uploaded images
+tar czf ~/uploads-$(date +%F).tar.gz -C ~/app/public uploads
+```
+
+Add both to a cron job and copy them off the VPS.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause |
+| ------- | ----- |
+| Process exits at boot mentioning `JWT_SECRET` | Secret missing, under 32 chars, or a placeholder. Generate a real one. |
+| `502 Bad Gateway` | Node process is down — `pm2 logs ecomzone`. |
+| `/health` says `database: disconnected` | Wrong `DATABASE_URL`, or Postgres is not running. |
+| Everyone gets rate limited at once | `X-Forwarded-For` not set in nginx, or `TRUST_PROXY_HOPS` mismatched. |
+| Razorpay webhook shows failures | `RAZORPAY_WEBHOOK_SECRET` does not match the dashboard value. |
+| CORS errors in the browser | `FRONTEND_URL` does not match the origin actually being used. |
+| Uploads 401 | Expected — uploading now requires an admin session. |
+| Bulk import fails on a big ZIP | Raise `client_max_body_size` in nginx and `BULK_IMPORT_MAX_BYTES`. |

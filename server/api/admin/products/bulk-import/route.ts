@@ -1,21 +1,15 @@
 import { prisma } from '../../../../lib/prisma';
 import { parse } from 'csv-parse/sync';
-import { verifyAdmin } from '../../../lib/adminAuth';
+import { verifyAdmin } from '../../../../lib/adminAuth';
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 
 const router = Router();
 
-// Extend Express Request type to include multer file
-declare global {
-  namespace Express {
-    interface Request {
-      file?: any;
-      files?: any[];
-    }
-  }
-}
+// NOTE: @types/multer already augments Express.Request with `file` and `files`.
+// Re-declaring them here as `any` conflicted with those definitions and broke
+// type checking for the whole server tree.
 
 // Setup multer for file uploads - configure to handle both file and form fields
 const upload = multer({ 
@@ -33,9 +27,9 @@ const handleMulterError = (err: any, req: Request, res: Response, next: any) => 
     });
   } else if (err) {
     console.error('Upload middleware error:', err.message);
-    return res.status(error.status || 500).json({ 
+    return res.status(err.status || 500).json({
       error: 'File upload failed',
-      message: err.message 
+      message: err.message
     });
   }
   next();

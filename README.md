@@ -1,67 +1,105 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# EcomZone
 
-## Environment
+Wholesale storefront and admin panel. Next.js 16 (App Router) and an Express API
+served from a single Node process, backed by PostgreSQL via Prisma 7.
 
-Create `.env.local` from `.env.example` and set your MongoDB connection string:
+## Architecture
 
-```bash
-MONGODB_URI=your_mongodb_connection_string
+One process serves everything. `server/custom-server.ts` creates the HTTP server
+and routes each request:
+
+| Path                            | Handled by                        |
+| ------------------------------- | --------------------------------- |
+| `/api/auth/*`                   | Next.js route handlers (`app/api`) |
+| `/api/*` (everything else)      | Express (`server/api`)             |
+| `/uploads/*`, `/health`         | Express                            |
+| everything else                 | Next.js pages                      |
+
+Because `/api/auth/*` never reaches Express, those endpoints rate limit
+themselves through `lib/rateLimit.ts` rather than the Express middleware in
+`server/lib/rateLimiter.ts`.
+
+```
+app/            Next.js pages, components, and the /api/auth route handlers
+server/api/     Express routers (products, orders, cart, payment, admin, ...)
+server/lib/     Server-only modules (prisma, auth, razorpay, mailer, shipping)
+lib/            Shared modules usable from both sides (jwt, password, schemas)
+prisma/         Schema and seed scripts
 ```
 
-## Getting Started
-
-First, run the development server:
+## Getting started
 
 ```bash
+npm install
+cp .env.example .env      # then fill in DATABASE_URL and JWT_SECRET
+npx prisma db push        # apply the schema
+npm run db:seed-admin     # create the super admin (reads SUPER_ADMIN_* vars)
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-## Products API
+`JWT_SECRET` must be at least 32 random characters — the server refuses to start
+otherwise. Generate one with:
 
-Base URL: `http://localhost:3000/api/products`
-
-- `GET /api/products` -> list products
-- `POST /api/products` -> create product
-- `GET /api/products/:id` -> fetch one product
-- `PUT /api/products/:id` -> update product
-- `DELETE /api/products/:id` -> delete product
-
-Example `POST` body:
-
-```json
-{
-  "name": "Running Shoes",
-  "description": "Lightweight shoes for daily running",
-  "price": 89.99,
-  "imageUrl": "https://example.com/shoes.jpg",
-  "category": "footwear",
-  "inStock": true
-}
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Command                | What it does                                    |
+| ---------------------- | ----------------------------------------------- |
+| `npm run dev`          | Start the unified dev server                     |
+| `npm run build`        | Generate the Prisma client and build Next.js     |
+| `npm start`            | Start the production server                      |
+| `npm run typecheck`    | Type check both the app and the Express backend  |
+| `npm run lint`         | ESLint                                           |
+| `npm run db:push`      | Apply the Prisma schema to the database          |
+| `npm run db:seed`      | Seed sample products (**deletes existing ones**) |
+| `npm run db:seed-admin`| Create or update the super admin account         |
 
-## Learn More
+`npm run typecheck` covers `server/` as well as `app/`. Run it in CI — the
+backend was previously excluded from every type check, which is how a batch of
+unresolvable imports reached the main branch.
 
-To learn more about Next.js, take a look at the following resources:
+## Payments
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Online payment goes through **Razorpay**. Cash on delivery needs no gateway.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The flow:
 
-## Deploy on Vercel
+1. `POST /api/orders/create` writes the order with `paymentStatus: PENDING`.
+   Prices, weight and shipping are all recalculated server-side from the
+   database — nothing about the amount is taken from the request body.
+2. `POST /api/payment/razorpay/create` creates the gateway order for the amount
+   stored on the order, and returns the public key plus the gateway order id.
+3. The browser opens Razorpay Checkout.
+4. `POST /api/payment/razorpay/verify` checks the HMAC signature on the callback
+   and marks the order paid. This is the fast path for the success page.
+5. `POST /api/payment/razorpay/webhook` is the authoritative source of truth.
+   It verifies the signature over the **raw** request body, confirms the captured
+   amount matches the order total, and is idempotent.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Both verification paths reject anything they cannot authenticate, so a payment
+cannot be confirmed by a caller that does not hold the API secret.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Configure the webhook at *dashboard.razorpay.com → Settings → Webhooks*:
+
+- URL: `https://ecomzone.in/api/payment/razorpay/webhook`
+- Events: `payment.captured`, `payment.failed`, `order.paid`
+- Set the same secret in `RAZORPAY_WEBHOOK_SECRET`
+
+## Passwords
+
+Passwords are stored as bcrypt hashes. Accounts created before that change hold
+reversible AES ciphertext; those still authenticate through a legacy read path
+and are transparently re-hashed on the next successful login. `ENCRYPTION_KEY`
+is only needed while such accounts remain and can be dropped afterwards.
+
+There is no way to read a user's password back — the admin panel exposes a
+password reset instead.
+
+## Deployment
+
+See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md).

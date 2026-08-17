@@ -6,7 +6,12 @@ const router = Router();
 
 router.post('/', async (req: Request, res: Response) => {
   try {
-    await verifyAdmin(req);
+    const admin = await verifyAdmin(req);
+
+    // Granting ADMIN is a privilege escalation, so restrict it to super admins.
+    if (!admin.isSuperAdmin) {
+      return res.status(403).json({ message: "Only a super admin can promote users" });
+    }
 
     const { email } = req.body;
 
@@ -25,6 +30,9 @@ router.post('/', async (req: Request, res: Response) => {
     const updatedUser = await prisma.user.update({
       where: { email },
       data: { role: "ADMIN" },
+      // Explicit select - the whole row (including the password column) used to
+      // be returned here.
+      select: { id: true, name: true, email: true, role: true },
     });
 
     return res.json({ message: `User ${email} promoted to ADMIN`, user: updatedUser });

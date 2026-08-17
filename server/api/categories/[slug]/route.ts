@@ -1,15 +1,21 @@
 import { prisma } from '../../../lib/prisma';
 import { Router, Request, Response } from 'express';
 
-const router = Router();
+const router = Router({ mergeParams: true });
+
+const MAX_PAGE_SIZE = 100;
 
 router.get('/', async (req: Request, res: Response) => {
   try {
-      const { slug  } = req.params;
-      const searchParams = req.nextUrl.searchParams;
-      const page = parseInt(searchParams.get('page') || '1');
-      const limit = parseInt(searchParams.get('limit') || '24');
-  
+      const { slug } = req.params;
+
+      // req.nextUrl is a Next.js API, not Express - this route always threw.
+      const page = Math.max(parseInt(String(req.query.page ?? '1'), 10) || 1, 1);
+      const limit = Math.min(
+        Math.max(parseInt(String(req.query.limit ?? '24'), 10) || 24, 1),
+        MAX_PAGE_SIZE
+      );
+
       // Get category by slug
       const category = await prisma.category.findUnique({
         where: { slug }

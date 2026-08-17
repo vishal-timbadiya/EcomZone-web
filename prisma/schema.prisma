@@ -1,6 +1,5 @@
 generator client {
   provider = "prisma-client-js"
-  engineType = "binary"
 }
 
 datasource db {
@@ -18,11 +17,13 @@ model User {
   isActive   Boolean @default(true)
   permissions Json?
   gstNumber String?
-  resetPasswordToken   String?
+  resetPasswordToken   String?   @unique
   resetPasswordExpires DateTime?
   createdAt DateTime @default(now())
 
   orders Order[]
+
+  @@index([role])
 }
 
 model Product {
@@ -50,6 +51,13 @@ model Product {
   isActive      Boolean     @default(true)
   createdAt     DateTime    @default(now())
   orderItems    OrderItem[]
+
+  @@index([isActive])
+  @@index([isActive, category])
+  @@index([isActive, isBestseller])
+  @@index([isActive, isNewArrival])
+  @@index([isActive, isTopRanking])
+  @@index([createdAt])
 }
 
 
@@ -74,6 +82,11 @@ model Order {
   courierName String?
   trackingId  String?
 
+  // Razorpay correlation. razorpayOrderId is the gateway order we created for
+  // this order; the webhook uses it to find the order it is confirming.
+  razorpayOrderId   String?  @unique
+  razorpayPaymentId String?
+
   shippingAddress Json?
   billingAddress Json?
   gstDetails      Json?
@@ -82,18 +95,27 @@ model Order {
   pdfSerialNumber Int?
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   items OrderItem[]
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([paymentStatus])
+  @@index([orderStatus])
 }
 
 model OrderItem {
   id        String  @id @default(uuid())
-  order     Order   @relation(fields: [orderId], references: [id])
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   orderId   String
   product   Product @relation(fields: [productId], references: [id])
   productId String
   quantity  Int
   price     Float
+
+  @@index([orderId])
+  @@index([productId])
 }
 
 model Settings {
@@ -122,6 +144,9 @@ enum Role {
 enum PaymentMode {
   COD
   UPI
+  RAZORPAY
+  // PHONEPE is retained so historical orders placed through the previous
+  // gateway remain readable. No new order is ever created with it.
   PHONEPE
 }
 

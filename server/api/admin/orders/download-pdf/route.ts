@@ -1,5 +1,5 @@
 import { prisma } from "../../../../lib/prisma";
-import { verifyAdmin } from '../../../lib/adminAuth';
+import { verifyAdmin } from '../../../../lib/adminAuth';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { Router, Request, Response } from 'express';
 

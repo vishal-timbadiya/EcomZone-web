@@ -1,11 +1,12 @@
 import { Router } from "express";
-import phonePeCreateRouter from "./phonepe/create/route";
-import phonePeWebhookRouter from "./phonepe/webhook/route";
+import razorpayCreateRouter from "./razorpay/create/route";
+import razorpayVerifyRouter from "./razorpay/verify/route";
 
 const router = Router();
 
-router.use("/phonepe/create", phonePeCreateRouter);
-router.use("/phonepe/webhook", phonePeWebhookRouter);
+router.use("/razorpay/create", razorpayCreateRouter);
+router.use("/razorpay/verify", razorpayVerifyRouter);
+// NOTE: /razorpay/webhook is deliberately mounted directly in server.ts, ahead of
+// the payment rate limiter, so retried webhook deliveries are never dropped.
 
 export default router;
-

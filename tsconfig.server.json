@@ -3,21 +3,19 @@
     "target": "ES2020",
     "module": "commonjs",
     "lib": ["ES2020"],
-    "outDir": "./dist",
-    "rootDir": "./server",
+    "noEmit": true,
     "strict": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
     "sourceMap": true,
     "noImplicitAny": false,
     "strictNullChecks": false,
     "allowSyntheticDefaultImports": true,
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
+    "types": ["node"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./server/*"],
@@ -32,6 +30,6 @@
       "module": "commonjs"
     }
   },
-  "include": ["server"],
-  "exclude": ["node_modules", "dist", "app", "frontend", "lib", "server/api/categories", "server/api/catalogue-pdf"]
+  "include": ["server/**/*.ts", "prisma/*.ts", "lib/jwt.ts", "lib/password.ts"],
+  "exclude": ["node_modules", "dist", "app", "archive", "server/lib/generated"]
 }

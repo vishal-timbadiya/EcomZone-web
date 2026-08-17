@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getCart, saveCart, CartItem } from "@/lib/cart";
+import { loadRazorpayCheckout, openRazorpayCheckout } from "@/lib/razorpay-checkout";
 
 function getAbsoluteImageUrl(url: string | null | undefined): string {
   if (!url) return '';
@@ -212,34 +213,21 @@ export default function CheckoutPage() {
     const fetchPaymentSettings = async () => {
       try {
         const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
-        const settingsUrl = `${apiUrl}/admin/settings/public`;
-        console.log('Fetching payment settings from:', settingsUrl);
-        const res = await fetch(settingsUrl);
-        console.log('Settings response status:', res.status);
-        
+        const res = await fetch(`${apiUrl}/admin/settings/public`);
+
         if (res.ok) {
           const data = await res.json();
-          console.log('Payment settings fetched:', data);
-          
+
           if (data.settings) {
             const cod = data.settings.codEnabled ?? true;
             const upi = data.settings.upiEnabled ?? true;
-            console.log('Setting payment methods - COD:', cod, 'UPI:', upi);
-            
+
             setCodEnabled(cod);
             setUpiEnabled(upi);
             
             // Set default payment mode based on enabled options
-            if (!cod && upi) {
-              console.log('Setting default payment mode to UPI');
-              setPaymentMode("UPI");
-            } else {
-              console.log('Setting default payment mode to COD');
-              setPaymentMode("COD");
-            }
+            setPaymentMode(!cod && upi ? "RAZORPAY" : "COD");
           }
-        } else {
-          console.warn('Failed to fetch payment settings, response status:', res.status);
         }
       } catch (e) {
         console.error("Failed to load payment settings", e);
@@ -346,44 +334,107 @@ export default function CheckoutPage() {
     const token = localStorage.getItem("token");
     if (!token) { alert("Please login first"); router.push("/login"); return; }
 
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+    const authHeaders = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    };
+
     try {
       setLoading(true);
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
-      console.log('Placing order to:', `${apiUrl}/orders/create`);
-      console.log('Order data:', { cartItems, paymentMode, shippingAddress });
-      
+      setError(null);
+
+      // The server recalculates prices, weight and shipping from the database,
+      // so those are no longer sent from here.
       const res = await fetch(`${apiUrl}/orders/create`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ 
-          cartItems, 
-          paymentMode, 
-          shippingAddress, 
-          billingAddress: sameAsShipping ? shippingAddress : billingAddress, 
-          useGstBilling, 
-          gstDetails: useGstBilling ? gstDetails : null, 
-          shippingCharge, 
-          totalWeight 
+        headers: authHeaders,
+        body: JSON.stringify({
+          cartItems,
+          paymentMode,
+          shippingAddress,
+          billingAddress: sameAsShipping ? shippingAddress : billingAddress,
+          useGstBilling,
+          gstDetails: useGstBilling ? gstDetails : null,
         })
       });
+
       const data = await res.json();
-      console.log('Order response:', { status: res.status, data });
-      
-      if (!res.ok) { 
-        console.error('Order creation failed:', data.error);
-        alert(data.error || "Order failed"); 
-        setError(data.error); 
-        return; 
+
+      if (!res.ok) {
+        setError(data.error || "Order failed");
+        return;
       }
-      
-      console.log('Order placed successfully:', data.orderId);
-      saveCart([]); 
-      setCartItems([]); 
-      router.push(`/payment-success?orderId=${data.orderId}`);
+
+      const orderId: string = data.orderId;
+
+      // Cash on delivery is complete once the order exists.
+      if (!data.requiresPayment) {
+        saveCart([]);
+        setCartItems([]);
+        router.push(`/payment-success?orderId=${orderId}`);
+        return;
+      }
+
+      // Online payment: create a gateway order, then open Razorpay Checkout.
+      const scriptLoaded = await loadRazorpayCheckout();
+
+      if (!scriptLoaded) {
+        setError("Could not load the payment gateway. Your order is saved - please retry payment from My Orders.");
+        return;
+      }
+
+      const sessionRes = await fetch(`${apiUrl}/payment/razorpay/create`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ orderId })
+      });
+
+      const session = await sessionRes.json();
+
+      if (!sessionRes.ok) {
+        setError(session.error || "Could not start the payment. Your order is saved.");
+        return;
+      }
+
+      const result = await openRazorpayCheckout({
+        session,
+        customerName: shippingAddress.name,
+        customerEmail: shippingAddress.email,
+        customerContact: shippingAddress.mobile,
+      });
+
+      // Customer closed the payment sheet without paying. The order stays
+      // PENDING rather than being reported as successful.
+      if (!result) {
+        setError("Payment was cancelled. Your order is saved and can be paid from My Orders.");
+        return;
+      }
+
+      // The gateway response is verified server-side; the browser is never
+      // trusted to declare a payment successful.
+      const verifyRes = await fetch(`${apiUrl}/payment/razorpay/verify`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          orderId,
+          razorpayOrderId: result.razorpay_order_id,
+          razorpayPaymentId: result.razorpay_payment_id,
+          razorpaySignature: result.razorpay_signature,
+        })
+      });
+
+      if (!verifyRes.ok) {
+        router.push(`/payment-failure?orderId=${orderId}`);
+        return;
+      }
+
+      saveCart([]);
+      setCartItems([]);
+      router.push(`/payment-success?orderId=${orderId}`);
     } catch (err) {
       console.error('Exception during order placement:', err);
-      alert("Error placing order"); 
-      router.push("/payment-failure"); 
+      setError("Something went wrong while placing your order. Please try again.");
     }
     finally { setLoading(false); }
   };
@@ -581,7 +632,7 @@ export default function CheckoutPage() {
                     )}
                     {upiEnabled && (
                       <label className="flex items-center gap-2 p-3 border border-gray-200 rounded-lg cursor-pointer hover:border-orange-500">
-                        <input type="radio" name="paymentMode" value="UPI" checked={paymentMode === "UPI"} onChange={(e) => setPaymentMode(e.target.value)} className="w-4 h-4 text-orange-500" />
+                        <input type="radio" name="paymentMode" value="RAZORPAY" checked={paymentMode === "RAZORPAY"} onChange={(e) => setPaymentMode(e.target.value)} className="w-4 h-4 text-orange-500" />
                         <span className="text-gray-700">UPI / Online Payment</span>
                       </label>
                     )}

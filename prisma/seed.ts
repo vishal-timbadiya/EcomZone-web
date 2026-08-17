@@ -1,6 +1,18 @@
+import 'dotenv/config'
 import { PrismaClient } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
+import pg from 'pg'
 
-const prisma = new PrismaClient()
+// The schema's datasource carries no url - the connection comes from the driver
+// adapter, so a bare `new PrismaClient()` throws at construction.
+const connectionString = process.env.DATABASE_URL
+
+if (!connectionString) {
+  throw new Error('DATABASE_URL is not set')
+}
+
+const pool = new pg.Pool({ connectionString })
+const prisma = new PrismaClient({ adapter: new PrismaPg(pool) })
 
 // Product categories
 const categories = [
@@ -233,4 +245,5 @@ main()
   })
   .finally(async () => {
     await prisma.$disconnect()
+    await pool.end()
   })

@@ -1,8 +1,108 @@
+import path from 'path';
+import { readFile } from 'fs/promises';
 import { prisma } from '../../lib/prisma';
 import { PDFDocument, rgb } from 'pdf-lib';
 import { Router, Request, Response } from 'express';
+import { logger } from '../../lib/logger';
 
 const router = Router();
+
+const IMAGE_FETCH_TIMEOUT_MS = 5000;
+const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+const IMAGE_CONCURRENCY = 8;
+
+interface CatalogueProduct {
+  id: string;
+  name: string;
+  productCode: string | null;
+  singlePrice: number;
+  cartonQty: number;
+  imageUrl: string;
+}
+
+interface CatalogueProductWithImage extends CatalogueProduct {
+  imageBuffer: Buffer | null;
+}
+
+function getCatalogueName(type: string): string {
+  switch (type) {
+    case 'new-arrivals':
+      return 'New Arrivals Catalogue';
+    case 'bestsellers':
+      return 'Bestsellers Catalogue';
+    default:
+      return 'Complete Product Catalogue';
+  }
+}
+
+/**
+ * Load a product image as a buffer.
+ *
+ * Relative URLs are read straight off the local uploads directory (resolved and
+ * range-checked so a crafted path cannot escape it). Remote URLs are fetched
+ * over http(s) only, with a timeout and a size cap.
+ */
+async function loadImage(imageUrl: string): Promise<Buffer | null> {
+  if (!imageUrl) return null;
+
+  try {
+    if (imageUrl.startsWith('/uploads/')) {
+      const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+      const resolved = path.resolve(process.cwd(), 'public', `.${imageUrl}`);
+
+      if (!resolved.startsWith(uploadsDir + path.sep)) return null;
+
+      return await readFile(resolved);
+    }
+
+    const parsed = new URL(imageUrl);
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(parsed.toString(), { signal: controller.signal });
+
+      if (!response.ok) return null;
+
+      const length = Number(response.headers.get('content-length') || 0);
+      if (length > MAX_IMAGE_BYTES) return null;
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+
+      return buffer.length <= MAX_IMAGE_BYTES ? buffer : null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch {
+    // A missing or unreachable image must not fail the whole catalogue.
+    return null;
+  }
+}
+
+/** Attach image buffers, fetching in bounded batches rather than all at once. */
+async function getProductsWithImages(
+  products: CatalogueProduct[]
+): Promise<CatalogueProductWithImage[]> {
+  const result: CatalogueProductWithImage[] = [];
+
+  for (let i = 0; i < products.length; i += IMAGE_CONCURRENCY) {
+    const batch = products.slice(i, i + IMAGE_CONCURRENCY);
+
+    const loaded = await Promise.all(
+      batch.map(async (product) => ({
+        ...product,
+        imageBuffer: await loadImage(product.imageUrl),
+      }))
+    );
+
+    result.push(...loaded);
+  }
+
+  return result;
+}
 
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -274,17 +374,21 @@ router.get('/', async (req: Request, res: Response) => {
       // Generate PDF buffer
       const pdfBytes = await pdfDoc.save();
   
-      // Set response headers
-      const headers = new Headers();
-      headers.set('Content-Type', 'application/pdf');
-      headers.set('Content-Disposition', `attachment; filename="${type}-catalogue.pdf"`);
-  
-      res.status(200);
-      res.set(headers);
-      return res.send(Buffer.from(pdfBytes));
+      // Set response headers. The Fetch API Headers object is not an Express
+      // header map - res.set() needs a plain object.
+      const safeType = type.replace(/[^a-z0-9-]/gi, '') || 'catalogue';
+      const pdfBuffer = Buffer.from(pdfBytes);
+
+      res.status(200).set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${safeType}-catalogue.pdf"`,
+        'Content-Length': String(pdfBuffer.length),
+      });
+
+      return res.send(pdfBuffer);
     } catch (error: any) {
-      console.error('Error generating PDF catalogue:', error);
-      return res.status(500).json({ error: 'PDF generation failed', message: error.message });
+      logger.error({ event: 'catalogue_pdf_failed', message: error?.message });
+      return res.status(500).json({ error: 'PDF generation failed' });
     }
   });
 

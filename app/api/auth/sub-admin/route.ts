@@ -1,32 +1,19 @@
-import { prisma } from '@/server/lib/prisma';
-import { encryptPassword } from '@/lib/encryption';
 import { NextRequest, NextResponse } from 'next/server';
-import jwt from 'jsonwebtoken';
+import { prisma } from '@/server/lib/prisma';
+import { hashPassword } from '@/lib/password';
+import { extractBearerToken, verifyAuthToken } from '@/lib/jwt';
+import { enforceRateLimit, SUB_ADMIN_LIMIT } from '@/lib/rateLimit';
 
-// Helper to get token from Authorization header
 function getTokenFromRequest(request: NextRequest): string | null {
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return null;
-  }
-  return authHeader.split(" ")[1];
+  return extractBearerToken(request.headers.get('authorization'));
 }
 
-// Helper to verify token
-function verifyToken(token: string): any {
-  try {
-    if (!process.env.JWT_SECRET) {
-      console.error("JWT_SECRET not configured");
-      return null;
-    }
-    return jwt.verify(token, process.env.JWT_SECRET);
-  } catch (error: any) {
-    console.error("JWT verification failed:", error.message);
-    return null;
-  }
-}
+const verifyToken = verifyAuthToken;
 
 export async function GET(request: NextRequest) {
+  const limited = enforceRateLimit(request, SUB_ADMIN_LIMIT);
+  if (limited) return limited;
+
   try {
     const token = getTokenFromRequest(request);
     
@@ -74,15 +61,15 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ subAdmins });
   } catch (error: any) {
-    console.error("Fetch sub-admins error:", error.message, error.stack);
-    return NextResponse.json(
-      { message: "Error fetching sub-admins", error: error.message },
-      { status: 500 }
-    );
+    console.error("Fetch sub-admins error:", error?.message);
+    return NextResponse.json({ message: "Error fetching sub-admins" }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
+  const limited = enforceRateLimit(request, SUB_ADMIN_LIMIT);
+  if (limited) return limited;
+
   try {
     const token = getTokenFromRequest(request);
     
@@ -119,6 +106,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (typeof password !== 'string' || password.length < 8) {
+      return NextResponse.json(
+        { message: "Password must be at least 8 characters" },
+        { status: 400 }
+      );
+    }
+
     // Check if user already exists
     const existingUser = await prisma.user.findFirst({
       where: {
@@ -133,7 +127,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const hashedPassword = encryptPassword(password);
+    const hashedPassword = await hashPassword(password);
 
     const subAdmin = await prisma.user.create({
       data: {
@@ -163,10 +157,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error: any) {
-    console.error("Create Sub-admin Error:", error.message, error.stack);
-    return NextResponse.json(
-      { message: "Error creating sub-admin", error: error.message },
-      { status: 500 }
-    );
+    console.error("Create Sub-admin Error:", error?.message);
+    return NextResponse.json({ message: "Error creating sub-admin" }, { status: 500 });
   }
 }

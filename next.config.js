@@ -1,11 +1,10 @@
 /** @type {import('next').NextConfig} */
 
 const nextConfig = {
-  // Ensure environment variables are available
-  env: {
-    DATABASE_URL: process.env.DATABASE_URL,
-  },
-  // Enable experimental features for better build performance
+  // NOTE: DATABASE_URL is deliberately NOT listed under `env`. Next inlines those
+  // values at build time into any bundle that references them, including client
+  // bundles - one stray import would have published the database credentials in
+  // a public JavaScript file. Server code reads process.env directly at runtime.
   experimental: {
     esmExternals: true,
   },

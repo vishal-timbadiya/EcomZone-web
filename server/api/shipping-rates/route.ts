@@ -1,7 +1,23 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../../lib/prisma';
+import { verifyAdmin } from '../../lib/adminAuth';
 
 const router = Router();
+
+/**
+ * Guard for the mutating handlers. Creating, updating and deleting shipping
+ * rates was previously unauthenticated, so any visitor could zero out delivery
+ * pricing or delete the rate table outright. Reads stay public - the checkout
+ * page needs them to quote shipping before login.
+ */
+async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  try {
+    await verifyAdmin(req);
+    next();
+  } catch (error: any) {
+    res.status(error?.status || 401).json({ error: error?.message || 'Unauthorized' });
+  }
+}
 
 // GET all shipping rates
 router.get('/', async (_req: Request, res: Response) => {
@@ -45,7 +61,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // CREATE new shipping rate
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { state, city, ratePerKg } = req.body;
     
@@ -54,6 +70,12 @@ router.post('/', async (req: Request, res: Response) => {
         error: 'Missing required fields',
         required: ['state', 'ratePerKg']
       });
+    }
+
+    const parsedRate = parseFloat(ratePerKg);
+
+    if (!Number.isFinite(parsedRate) || parsedRate < 0) {
+      return res.status(400).json({ error: 'ratePerKg must be a non-negative number' });
     }
     
     // Check if rate already exists for this state/city combination
@@ -73,7 +95,7 @@ router.post('/', async (req: Request, res: Response) => {
       data: {
         state,
         city: city || null,
-        ratePerKg: parseFloat(ratePerKg)
+        ratePerKg: parsedRate
       }
     });
     
@@ -88,14 +110,22 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // UPDATE shipping rate
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { ratePerKg, isActive } = req.body;
     
     const updateData: any = {};
-    if (ratePerKg !== undefined) updateData.ratePerKg = parseFloat(ratePerKg);
-    if (isActive !== undefined) updateData.isActive = isActive;
+
+    if (ratePerKg !== undefined) {
+      const parsedRate = parseFloat(ratePerKg);
+      if (!Number.isFinite(parsedRate) || parsedRate < 0) {
+        return res.status(400).json({ error: 'ratePerKg must be a non-negative number' });
+      }
+      updateData.ratePerKg = parsedRate;
+    }
+
+    if (isActive !== undefined) updateData.isActive = Boolean(isActive);
     
     if (Object.keys(updateData).length === 0) {
       return res.status(400).json({ 
@@ -123,7 +153,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 });
 
 // DELETE shipping rate
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', requireAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     

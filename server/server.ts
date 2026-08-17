@@ -3,11 +3,8 @@ import cors from 'cors';
 import path from 'path';
 import { prisma } from './lib/prisma';
 import { logger } from './lib/logger';
-import { 
-  apiLimiter, 
-  loginLimiter, 
-  signupLimiter, 
-  forgotPasswordLimiter,
+import {
+  apiLimiter,
   adminLimiter,
   uploadLimiter,
   paymentLimiter
@@ -22,37 +19,40 @@ import cartRoutes from './api/cart';
 import shippingRatesRoutes from './api/shipping-rates';
 import paymentRoutes from './api/payment';
 import uploadRoutes from './api/upload';
-// import emailRoutes from './api/email';
-// import cataloguePdfRoutes from './api/catalogue-pdf';
-// import invoiceRoutes from './api/invoice';
+import razorpayWebhookRoutes from './api/payment/razorpay/webhook/route';
+import cataloguePdfRoutes from './api/catalogue-pdf';
 import adminRoutes from './api/admin';
-// import instagramReelsRoutes from './api/instagram-reels';
-// import youtubeShortRoutes from './api/youtube-shorts';
-// import seedProductsRoutes from './api/seed-products';
-import testRoutes from './api/test';
+import youtubeShortRoutes from './api/youtube-shorts';
 
 const app: Express = express();
 
-// Initialize Sentry for error tracking (if DSN is provided)
-if (process.env.SENTRY_DSN) {
+// Initialize Sentry for error tracking (if DSN is provided).
+// @sentry/node v8+ removed Sentry.Handlers / Sentry.Integrations; HTTP instrumentation
+// is registered automatically by init() and errors are wired up via
+// setupExpressErrorHandler() after the routes are mounted.
+const sentryEnabled = Boolean(process.env.SENTRY_DSN);
+
+if (sentryEnabled) {
   Sentry.init({
     dsn: process.env.SENTRY_DSN,
     environment: process.env.NODE_ENV || 'development',
     tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
-    integrations: [
-      new Sentry.Integrations.Http({ tracing: true }),
-    ],
   });
-  app.use(Sentry.Handlers.requestHandler());
   logger.info('Sentry error tracking initialized');
 }
+
+// Trust the platform reverse proxy (Render / Hostinger nginx) so that req.ip is the
+// real client address rather than the proxy's. Without this every request shares a
+// single rate-limit bucket.
+app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS || 1));
 
 // Middleware
 app.use(cors({
   origin: (origin, callback) => {
     const allowedOrigins = [
-      process.env.FRONTEND_URL,        // https://www.ecomzone.in
-      'https://ecomzone-web.onrender.com', // temporary, until domain live
+      process.env.FRONTEND_URL,
+      'https://ecomzone.in',
+      'https://www.ecomzone.in',
       'http://localhost:3000',         // local development
     ].filter(Boolean);
 
@@ -60,7 +60,10 @@ app.use(cors({
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(new Error(`CORS blocked: ${origin}`));
+      // Decline without CORS headers instead of throwing, which would surface as a
+      // 500 with the origin reflected back in the response body.
+      logger.warn({ event: 'cors_blocked', origin });
+      callback(null, false);
     }
   },
   credentials: true,
@@ -105,9 +108,23 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   return next(err);
 });
 
-// Serve static files (uploads directory)
+// Serve static files (uploads directory).
+// Uploads are restricted to images at the upload endpoint, but these headers make
+// sure anything already on disk cannot execute in a browser: no content sniffing,
+// no directory listing, and a restrictive CSP for the /uploads origin path.
 const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-app.use('/uploads', express.static(uploadsDir));
+app.use(
+  '/uploads',
+  express.static(uploadsDir, {
+    index: false,
+    dotfiles: 'deny',
+    setHeaders: (res) => {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    },
+  })
+);
 
 // Root endpoint
 app.get('/', (_req: Request, res: Response) => {
@@ -124,7 +141,6 @@ app.get('/', (_req: Request, res: Response) => {
       shipping: '/api/shipping-rates',
       payment: '/api/payment',
       upload: '/api/upload',
-      email: '/api/email',
       admin: '/api/admin'
     }
   });
@@ -153,13 +169,17 @@ app.get('/health', async (_req: Request, res: Response) => {
   }
 });
 
+// The Razorpay webhook is mounted before the global limiter. It is authenticated
+// by HMAC signature rather than by rate, and Razorpay retries deliveries - a
+// dropped webhook is a lost payment confirmation.
+app.use('/api/payment/razorpay/webhook', razorpayWebhookRoutes);
+
 // Global API Rate Limiter (before routes)
 app.use('/api/', apiLimiter);
 
-// API Routes - Mount all routes with specific rate limiters
-app.use('/api/auth/login', loginLimiter);
-app.use('/api/auth/signup', signupLimiter);
-app.use('/api/auth/forgot-password', forgotPasswordLimiter);
+// NOTE: /api/auth/* is served by the Next.js app router, not Express (see
+// custom-server.ts), so mounting loginLimiter/signupLimiter/forgotPasswordLimiter
+// here would be dead code. Those endpoints rate limit themselves via lib/rateLimit.ts.
 app.use('/api/products', productsRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/orders', ordersRoutes);
@@ -167,53 +187,54 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/shipping-rates', shippingRatesRoutes);
 app.use('/api/payment', paymentLimiter, paymentRoutes);
 app.use('/api/upload', uploadLimiter, uploadRoutes);
-// app.use('/api/email', emailRoutes);
-// app.use('/api/catalogue-pdf', cataloguePdfRoutes);
-// app.use('/api/invoice', invoiceRoutes);
+// These two are called by the storefront (app/catalogues and VideoReelsSection)
+// but were left commented out, so both pages failed at runtime.
+app.use('/api/catalogue-pdf', cataloguePdfRoutes);
+app.use('/api/youtube-shorts', youtubeShortRoutes);
 app.use('/api/admin', adminLimiter, adminRoutes);
-// app.use('/api/instagram-reels', instagramReelsRoutes);
-// app.use('/api/youtube-shorts', youtubeShortRoutes);
-// app.use('/api/seed-products', seedProductsRoutes);
-app.use('/api/test', testRoutes);
 
-// Error handling middleware - MUST be before Sentry handler
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+// 404 handler - must come after all routes but before the error handler
+app.use((_req: Request, res: Response) => {
+  res.status(404).json({ message: 'Route not found' });
+});
+
+// Sentry error handler (if initialized) - must be registered before our own handler
+// so it observes the error, and it calls next(err) itself rather than responding.
+if (sentryEnabled) {
+  Sentry.setupExpressErrorHandler(app);
+}
+
+// Final error handler. Responds once and never calls next() - continuing the chain
+// after a response has been sent writes after headers.
+app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
+  const statusCode = err.status || err.statusCode || 500;
+
   logger.error({
     event: 'unhandled_error',
     message: err.message,
     path: req.path,
     method: req.method,
-    status: err.status || err.statusCode || 500,
+    status: statusCode,
   });
 
-  // Always respond with JSON
-  const statusCode = err.status || err.statusCode || 500;
-  const message = err.message || 'Internal Server Error';
+  if (res.headersSent) {
+    return;
+  }
+
+  // Only leak internal messages for client errors; 5xx returns a generic message so
+  // stack traces and driver errors never reach the client.
+  const isClientError = statusCode >= 400 && statusCode < 500;
+  const message = isClientError ? err.message || 'Bad Request' : 'Internal Server Error';
 
   res.status(statusCode).json({
     error: message,
-    message: message,
+    message,
     details: process.env.NODE_ENV === 'development' ? {
       stack: err.stack,
       path: req.path,
       method: req.method
     } : undefined
   });
-  
-  // Call Sentry if available
-  if (process.env.SENTRY_DSN) {
-    next(err);
-  }
-});
-
-// Sentry error handler (if initialized)
-if (process.env.SENTRY_DSN) {
-  app.use(Sentry.Handlers.errorHandler());
-}
-
-// 404 handler
-app.use((_req: Request, res: Response) => {
-  res.status(404).json({ message: 'Route not found' });
 });
 
 export default app;

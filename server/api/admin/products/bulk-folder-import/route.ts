@@ -1,8 +1,8 @@
-import { verifyAdmin } from '../../../lib/adminAuth';
+import { verifyAdmin } from '../../../../lib/adminAuth';
 import { writeFile, mkdir, readdir, unlink, readFile, rm } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { csvStorage } from '../../../lib/csvStorage';
+import { csvStorage } from '../../../../lib/csvStorage';
 import { Router, Request, Response } from 'express';
 import AdmZip from 'adm-zip';
 import { parse } from 'csv-parse/sync';
@@ -12,14 +12,45 @@ const router = Router();
 
 // Setup multer for file uploads
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
-const upload = multer({ 
-  storage: multer.memoryStorage()  // Store file in memory for processing
+// Bounded so a large or malicious archive cannot exhaust memory or disk.
+const MAX_ZIP_BYTES = Number(process.env.BULK_IMPORT_MAX_BYTES || 100 * 1024 * 1024); // 100 MB
+const MAX_UNCOMPRESSED_BYTES = MAX_ZIP_BYTES * 10;
+const MAX_ZIP_ENTRIES = 5000;
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_ZIP_BYTES, files: 1 },
 });
 
-// Helper function to extract ZIP
+// Helper function to extract ZIP.
+// The archive is inspected before extraction: a zip bomb declares a small
+// compressed size but expands to far more, and entry paths containing ".." or
+// an absolute prefix must never be written.
 async function extractZip(zipPath: string, targetDir: string): Promise<void> {
   try {
     const zip = new AdmZip(zipPath);
+    const entries = zip.getEntries();
+
+    if (entries.length > MAX_ZIP_ENTRIES) {
+      throw new Error(`Archive contains too many files (limit ${MAX_ZIP_ENTRIES})`);
+    }
+
+    let totalUncompressed = 0;
+
+    for (const entry of entries) {
+      const name = entry.entryName;
+
+      if (name.startsWith('/') || name.includes('..') || path.isAbsolute(name)) {
+        throw new Error(`Unsafe path in archive: ${name}`);
+      }
+
+      totalUncompressed += entry.header.size;
+
+      if (totalUncompressed > MAX_UNCOMPRESSED_BYTES) {
+        throw new Error('Archive expands beyond the allowed size');
+      }
+    }
+
     zip.extractAllTo(targetDir, true);
   } catch (error: any) {
     throw new Error(`ZIP extraction failed: ${error.message}`);
@@ -209,7 +240,7 @@ router.post('/', upload.single('file'), async (req: Request, res: Response) => {
       "isBestseller", "isNewArrival", "isTopRanking", "imageUrl", "imageUrls"
     ];
     
-    const maxImages = Math.max(...products.map(p => p.imageUrls.length));
+    const maxImages = products.reduce((max, p) => Math.max(max, p.imageUrls.length), 0);
     
     for (let i = 1; i <= maxImages; i++) {
       headers.push(`image${i}`);

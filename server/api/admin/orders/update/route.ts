@@ -1,5 +1,5 @@
 import { prisma } from "../../../../lib/prisma";
-import { verifyAdmin } from '../../../lib/adminAuth';
+import { verifyAdmin } from '../../../../lib/adminAuth';
 import { Router, Request, Response } from 'express';
 
 const router = Router();
@@ -10,6 +10,17 @@ router.put('/', async (req: Request, res: Response) => {
   
       const body = req.body;
       const { orderId, orderStatus, paymentStatus, courierName, trackingId } = body;
+
+      const ORDER_STATUSES = ['CONFIRMED', 'PACKED', 'DISPATCHED', 'DELIVERED', 'CANCELLED'];
+      const PAYMENT_STATUSES = ['PENDING', 'SUCCESS', 'FAILED'];
+
+      if (orderStatus && !ORDER_STATUSES.includes(orderStatus)) {
+        return res.status(400).json({ message: 'Invalid order status' });
+      }
+
+      if (paymentStatus && !PAYMENT_STATUSES.includes(paymentStatus)) {
+        return res.status(400).json({ message: 'Invalid payment status' });
+      }
   
       const existingOrder = await prisma.order.findUnique({
         where: { orderId },
@@ -65,9 +76,14 @@ router.put('/', async (req: Request, res: Response) => {
         updatedOrder,
       });
     } catch (error: any) {
-      console.error("Admin Order Update Error:", error.message);
-  
-      return res.status(401).json({ message: "Unauthorized or update failed" });
+      console.error("Admin Order Update Error:", error?.message);
+
+      // Propagate the real status. Every failure - including database errors -
+      // used to be reported as 401, which sent anyone debugging it down the
+      // wrong path.
+      return res
+        .status(error?.status || 500)
+        .json({ message: error?.status ? error.message : "Order update failed" });
     }
   });
 

@@ -49,8 +49,8 @@ async function apiRequest<T = any>(
   };
 
   // Add auth token if available
-  const token = typeof window !== 'undefined' 
-    ? localStorage.getItem('authToken') 
+  const token = typeof window !== 'undefined'
+    ? localStorage.getItem('token')
     : null;
   
   if (token) {
@@ -161,9 +161,19 @@ export const api = {
 
   // Payment
   payment: {
-    createPhonePe: (data: any) => apiRequest('/api/payment/phonepe/create', { 
-      method: 'POST', 
-      body: JSON.stringify(data) 
+    createRazorpayOrder: (orderId: string) => apiRequest('/api/payment/razorpay/create', {
+      method: 'POST',
+      body: JSON.stringify({ orderId })
+    }),
+
+    verifyRazorpayPayment: (data: {
+      orderId: string;
+      razorpayOrderId: string;
+      razorpayPaymentId: string;
+      razorpaySignature: string;
+    }) => apiRequest('/api/payment/razorpay/verify', {
+      method: 'POST',
+      body: JSON.stringify(data)
     }),
   },
 
@@ -173,22 +183,9 @@ export const api = {
       method: 'POST',
       body: formData,
       headers: {
-        'Authorization': `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('authToken') : ''}`,
+        'Authorization': `Bearer ${typeof window !== 'undefined' ? localStorage.getItem('token') : ''}`,
       },
     }).then(r => r.json()),
-  },
-
-  // Email
-  email: {
-    send: (data: any) => apiRequest('/api/email/send', { 
-      method: 'POST', 
-      body: JSON.stringify(data) 
-    }),
-  },
-
-  // Invoice
-  invoice: {
-    getByOrderId: (orderId: string) => apiRequest(`/api/invoice/${orderId}`),
   },
 
   // Admin endpoints
@@ -253,10 +250,11 @@ export const api = {
     users: {
       getAll: () => apiRequest('/api/admin/users'),
       getById: (id: string) => apiRequest(`/api/admin/users/${id}`),
-      resetPassword: (data: any) => apiRequest('/api/admin/users/reset-password', { 
-        method: 'POST', 
-        body: JSON.stringify(data) 
-      }),
+      resetPassword: (id: string, newPassword: string) =>
+        apiRequest(`/api/admin/users/reset-password/${id}`, {
+          method: 'POST',
+          body: JSON.stringify({ newPassword })
+        }),
     },
 
     settings: {

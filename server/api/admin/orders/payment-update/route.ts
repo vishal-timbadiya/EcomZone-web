@@ -1,5 +1,5 @@
 import { prisma } from "../../../../lib/prisma";
-import { requireAdmin } from '../../../lib/middleware';
+import { requireAdmin } from '../../../../lib/middleware';
 import { Router, Request, Response } from 'express';
 
 const router = Router();

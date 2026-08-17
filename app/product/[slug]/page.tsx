@@ -98,7 +98,10 @@ export default async function ProductPage({
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
-            __html: JSON.stringify(structuredData),
+            // JSON.stringify does not escape "<", so a product name or
+            // description containing "</script>" would close this tag and
+            // execute whatever followed.
+            __html: JSON.stringify(structuredData).replace(/</g, '\u003c'),
           }}
         />
         <ProductClient product={product as any} />

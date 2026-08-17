@@ -1,21 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/server/lib/prisma';
-import jwt from 'jsonwebtoken';
+import { extractBearerToken, verifyAuthToken } from '@/lib/jwt';
 
-// Helper to extract token from Authorization header
 function getTokenFromRequest(request: NextRequest): string | null {
-  const authHeader = request.headers.get('authorization');
-  return authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  return extractBearerToken(request.headers.get('authorization'));
 }
 
-// Helper to verify token
-function verifyToken(token: string): any {
-  try {
-    return jwt.verify(token, process.env.JWT_SECRET as string);
-  } catch {
-    return null;
-  }
-}
+const verifyToken = verifyAuthToken;
 
 export async function GET(request: NextRequest) {
   try {
@@ -84,14 +75,28 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, email, phone, address, gstNumber } = body;
+    const { name, phone, gstNumber } = body;
+
+    // Only these three fields are editable. `email` and `address` used to be
+    // accepted and silently dropped, and the response then echoed the unchanged
+    // email back as though it had been saved.
+    if (body.email !== undefined || body.address !== undefined) {
+      return NextResponse.json(
+        { error: 'Email and address cannot be changed here' },
+        { status: 400 }
+      );
+    }
+
+    if (phone !== undefined && !/^[0-9]{10}$/.test(String(phone))) {
+      return NextResponse.json({ error: 'Mobile must be 10 digits' }, { status: 400 });
+    }
 
     const updatedUser = await prisma.user.update({
       where: { id: decoded.userId },
       data: {
-        name,
-        mobile: phone,
-        gstNumber
+        ...(name !== undefined ? { name: String(name) } : {}),
+        ...(phone !== undefined ? { mobile: String(phone) } : {}),
+        ...(gstNumber !== undefined ? { gstNumber: String(gstNumber) } : {}),
       }
     });
 
