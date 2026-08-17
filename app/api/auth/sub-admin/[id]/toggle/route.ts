@@ -1,29 +1,14 @@
 import { prisma } from '@/server/lib/prisma';
+import { extractBearerToken, verifyAuthToken } from '@/lib/jwt';
 import { NextRequest, NextResponse } from 'next/server';
-import jwt from 'jsonwebtoken';
 
 // Helper to get token from Authorization header
 function getTokenFromRequest(request: NextRequest): string | null {
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return null;
-  }
-  return authHeader.split(" ")[1];
+  return extractBearerToken(request.headers.get('authorization'));
 }
 
 // Helper to verify token
-function verifyToken(token: string): any {
-  try {
-    if (!process.env.JWT_SECRET) {
-      console.error("JWT_SECRET not configured");
-      return null;
-    }
-    return jwt.verify(token, process.env.JWT_SECRET);
-  } catch (error: any) {
-    console.error("JWT verification failed:", error.message);
-    return null;
-  }
-}
+const verifyToken = verifyAuthToken;
 
 export async function PATCH(
   request: NextRequest,

@@ -76,7 +76,7 @@ export const createOrderSchema = z.object({
   items: z.array(orderItemSchema).min(1, 'At least one item required'),
   shippingAddress: addressSchema,
   billingAddress: addressSchema.optional(),
-  paymentMethod: z.enum(['COD', 'UPI', 'PHONEPE']),
+  paymentMethod: z.enum(['COD', 'UPI', 'RAZORPAY']),
   notes: z.string().max(500).optional(),
 });
 
