@@ -10,6 +10,11 @@ services:
         value: production
       - key: NPM_CONFIG_PRODUCTION
         value: false
+      # Render sets NODE_ENV=production, which makes npm skip devDependencies.
+      # The build needs @tailwindcss/postcss, tailwindcss and typescript from
+      # there, so dev deps must be installed explicitly.
+      - key: NPM_CONFIG_INCLUDE
+        value: dev
     disk:
       name: uploads
       mountPath: /opt/render/project/src/public/uploads
