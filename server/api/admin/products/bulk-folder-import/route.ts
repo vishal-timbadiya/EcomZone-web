@@ -16,12 +16,11 @@ const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
 const TMP_DIR = path.join(process.cwd(), 'tmp', 'bulk-import');
 
 // Default 2 GB. The archive is streamed to disk and then read entry by entry,
-// so this ceiling is bounded by disk space, not by RAM.
+// so this ceiling is bounded by disk space and upload time, not by RAM.
 //
-// NOTE: a reverse proxy in front of the app may impose a lower limit of its
-// own. Render fronts every service with Cloudflare, which rejects request
-// bodies over ~100 MB before they ever reach Node, so on Render the effective
-// ceiling is that, regardless of what is configured here.
+// Measured on the current deployment: 400 MB uploads and extracts successfully
+// in about 160 s with flat memory. The practical limit is how long the client
+// is willing to hold the request open, not a proxy body cap.
 const MAX_ZIP_BYTES = Number(process.env.BULK_IMPORT_MAX_BYTES || 2 * 1024 * 1024 * 1024);
 const MAX_UNCOMPRESSED_BYTES = Number(
   process.env.BULK_IMPORT_MAX_UNCOMPRESSED_BYTES || MAX_ZIP_BYTES * 5

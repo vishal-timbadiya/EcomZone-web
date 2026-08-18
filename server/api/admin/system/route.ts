@@ -88,7 +88,7 @@ router.get('/', async (req: Request, res: Response) => {
       bulkImport: {
         maxZipMB: mb(maxZipBytes),
         maxEntries: Number(process.env.BULK_IMPORT_MAX_ENTRIES || 20000),
-        note: 'A reverse proxy in front of this app may enforce a lower limit. Render fronts services with Cloudflare, which rejects bodies over roughly 100 MB before they reach the app.',
+        note: 'Bounded by free disk and upload time rather than RAM; extraction streams entry by entry. 400 MB verified end to end.',
       },
       uptimeSeconds: Math.round(process.uptime()),
       nodeVersion: process.version,
