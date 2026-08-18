@@ -1,60 +1,92 @@
 import { verifyAdmin } from '../../../../lib/adminAuth';
-import { writeFile, mkdir, readdir, unlink, readFile, rm } from 'fs/promises';
+import { writeFile, mkdir, unlink, rm, rename, copyFile, statfs } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { csvStorage } from '../../../../lib/csvStorage';
-import { Router, Request, Response } from 'express';
-import AdmZip from 'adm-zip';
+import { logger } from '../../../../lib/logger';
+import { extractZipStreaming } from '../../../../lib/zip';
+import { Router, Request, Response, NextFunction } from 'express';
 import { parse } from 'csv-parse/sync';
 import multer from 'multer';
 
 const router = Router();
 
-// Setup multer for file uploads
 const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads');
-// Bounded so a large or malicious archive cannot exhaust memory or disk.
-const MAX_ZIP_BYTES = Number(process.env.BULK_IMPORT_MAX_BYTES || 100 * 1024 * 1024); // 100 MB
-const MAX_UNCOMPRESSED_BYTES = MAX_ZIP_BYTES * 10;
-const MAX_ZIP_ENTRIES = 5000;
+const TMP_DIR = path.join(process.cwd(), 'tmp', 'bulk-import');
 
+// Default 2 GB. The archive is streamed to disk and then read entry by entry,
+// so this ceiling is bounded by disk space, not by RAM.
+//
+// NOTE: a reverse proxy in front of the app may impose a lower limit of its
+// own. Render fronts every service with Cloudflare, which rejects request
+// bodies over ~100 MB before they ever reach Node, so on Render the effective
+// ceiling is that, regardless of what is configured here.
+const MAX_ZIP_BYTES = Number(process.env.BULK_IMPORT_MAX_BYTES || 2 * 1024 * 1024 * 1024);
+const MAX_UNCOMPRESSED_BYTES = Number(
+  process.env.BULK_IMPORT_MAX_UNCOMPRESSED_BYTES || MAX_ZIP_BYTES * 5
+);
+const MAX_ZIP_ENTRIES = Number(process.env.BULK_IMPORT_MAX_ENTRIES || 20000);
+const IMAGE_PATTERN = /\.(jpg|jpeg|png|gif|webp|avif)$/i;
+
+// Refuse to start an import that would fill the disk. Needs room for the
+// uploaded archive plus its extracted contents plus the final copies.
+const DISK_HEADROOM_MULTIPLIER = 3;
+
+/**
+ * Disk-backed upload. memoryStorage buffered the entire archive in RAM, which
+ * combined with adm-zip's own full-file buffer to OOM-kill the container
+ * (512 MiB on this plan) on archives approaching 100 MB.
+ */
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      mkdir(TMP_DIR, { recursive: true })
+        .then(() => cb(null, TMP_DIR))
+        .catch((err) => cb(err, TMP_DIR));
+    },
+    filename: (_req, _file, cb) => cb(null, `upload-${Date.now()}-${randomUUID()}.zip`),
+  }),
   limits: { fileSize: MAX_ZIP_BYTES, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (!file.originalname.toLowerCase().endsWith('.zip')) {
+      cb(new Error('Please upload a ZIP file'));
+      return;
+    }
+    cb(null, true);
+  },
 });
 
-// Helper function to extract ZIP.
-// The archive is inspected before extraction: a zip bomb declares a small
-// compressed size but expands to far more, and entry paths containing ".." or
-// an absolute prefix must never be written.
-async function extractZip(zipPath: string, targetDir: string): Promise<void> {
+/** Free bytes on the filesystem holding the uploads directory. */
+async function freeDiskBytes(): Promise<number | null> {
   try {
-    const zip = new AdmZip(zipPath);
-    const entries = zip.getEntries();
-
-    if (entries.length > MAX_ZIP_ENTRIES) {
-      throw new Error(`Archive contains too many files (limit ${MAX_ZIP_ENTRIES})`);
-    }
-
-    let totalUncompressed = 0;
-
-    for (const entry of entries) {
-      const name = entry.entryName;
-
-      if (name.startsWith('/') || name.includes('..') || path.isAbsolute(name)) {
-        throw new Error(`Unsafe path in archive: ${name}`);
-      }
-
-      totalUncompressed += entry.header.size;
-
-      if (totalUncompressed > MAX_UNCOMPRESSED_BYTES) {
-        throw new Error('Archive expands beyond the allowed size');
-      }
-    }
-
-    zip.extractAllTo(targetDir, true);
-  } catch (error: any) {
-    throw new Error(`ZIP extraction failed: ${error.message}`);
+    const stats = await statfs(process.cwd());
+    return stats.bavail * stats.bsize;
+  } catch {
+    return null;
   }
+}
+
+/**
+ * Translate multer's errors into real status codes. Without this, exceeding the
+ * size limit surfaced as a dead connection and the browser reported only
+ * "Network error".
+ */
+function handleUpload(req: Request, res: Response, next: NextFunction) {
+  upload.single('file')(req, res, (err: any) => {
+    if (!err) return next();
+
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      const gb = (MAX_ZIP_BYTES / (1024 * 1024 * 1024)).toFixed(2);
+      return res.status(413).json({
+        success: false,
+        message: `ZIP is too large. The maximum accepted size is ${gb} GB.`,
+      });
+    }
+
+    logger.warn({ event: 'bulk_import_upload_rejected', message: err.message });
+    return res.status(400).json({ success: false, message: err.message || 'Upload failed' });
+  });
 }
 
 // Helper function to validate product data
@@ -147,89 +179,103 @@ function validateProduct(data: any, rowIndex: number): { valid: boolean; data?: 
   };
 }
 
-router.post('/', upload.single('file'), async (req: Request, res: Response) => {
+router.post('/', handleUpload, async (req: Request, res: Response) => {
+  let zipPath: string | undefined;
+  let workDir: string | undefined;
+
   try {
     await verifyAdmin(req);
 
-    // Check if file exists
     if (!req.file) {
       return res.status(400).json({ success: false, message: "No file uploaded" });
     }
 
-    const file = req.file;
-    
-    if (!file.originalname.toLowerCase().endsWith(".zip")) {
-      return res.status(400).json({ success: false, message: "Please upload a ZIP file" });
+    zipPath = req.file.path;
+    const zipSize = req.file.size;
+
+    // Extraction plus the final copies need several times the archive size.
+    const free = await freeDiskBytes();
+
+    if (free !== null && free < zipSize * DISK_HEADROOM_MULTIPLIER) {
+      const needMb = Math.ceil((zipSize * DISK_HEADROOM_MULTIPLIER) / (1024 * 1024));
+      const freeMb = Math.floor(free / (1024 * 1024));
+      return res.status(507).json({
+        success: false,
+        message: `Not enough disk space to process this archive. Needs about ${needMb} MB free, only ${freeMb} MB available.`,
+      });
     }
 
-    const timestamp = Date.now();
-    const tempDir = path.join(process.cwd(), "public/uploads", `bulk-${timestamp}`);
-    
-    if (!existsSync(tempDir)) {
-      await mkdir(tempDir, { recursive: true });
+    workDir = path.join(TMP_DIR, `work-${Date.now()}-${randomUUID()}`);
+    await mkdir(workDir, { recursive: true });
+    await mkdir(UPLOAD_DIR, { recursive: true });
+
+    // Streamed entry by entry - memory stays flat regardless of archive size.
+    const extracted = await extractZipStreaming(zipPath, workDir, {
+      maxEntries: MAX_ZIP_ENTRIES,
+      maxUncompressedBytes: MAX_UNCOMPRESSED_BYTES,
+      allowedExtensions: IMAGE_PATTERN,
+    });
+
+    // The archive is no longer needed once extracted.
+    await unlink(zipPath).catch(() => {});
+    zipPath = undefined;
+
+    logger.info({
+      event: 'bulk_import_extracted',
+      zipBytes: zipSize,
+      entries: extracted.entriesSeen,
+      images: extracted.files.length,
+      uncompressedBytes: extracted.totalBytes,
+    });
+
+    // Group images by their top-level folder, which is the product code.
+    const byFolder = new Map<string, string[]>();
+
+    for (const file of extracted.files) {
+      if (!byFolder.has(file.folder)) byFolder.set(file.folder, []);
+      byFolder.get(file.folder)!.push(file.absolutePath);
     }
 
-    const buffer = file.buffer;
-    const zipPath = path.join(tempDir, "upload.zip");
-    await writeFile(zipPath, buffer);
-    
-    await extractZip(zipPath, tempDir);
-    await unlink(zipPath);
-
-    const folders = await readdir(tempDir, { withFileTypes: true });
     const products: any[] = [];
-    
-    for (const folder of folders) {
-      if (folder.isDirectory()) {
-        const folderName = folder.name;
-        const folderPath = path.join(tempDir, folderName);
-        
-        const files = await readdir(folderPath);
-        const imageFiles = files
-          .filter(f => /\.(jpg|jpeg|png|gif|webp)$/i.test(f))
-          .sort();
-          
-        if (imageFiles.length > 0) {
-          const imageUrls: string[] = [];
-          
-          for (const imageFile of imageFiles) {
-            const imagePath = path.join(folderPath, imageFile);
-            const imageBuffer = await readFile(imagePath);
-            
-            const ext = path.extname(imageFile);
-            const newFilename = `${folderName}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}${ext}`;
-            const uploadDir = path.join(process.cwd(), "public/uploads");
-            const uploadPath = path.join(uploadDir, newFilename);
-            
-            await writeFile(uploadPath, imageBuffer);
-            
-            const imageUrl = `/uploads/${newFilename}`;
-            imageUrls.push(imageUrl);
-          }
-          
-          products.push({
-            productCode: folderName,
-            name: "",
-            description: "",
-            primaryImage: imageUrls[0] || "",
-            imageUrls: imageUrls,
-            totalImages: imageUrls.length,
-          });
+
+    for (const [folderName, imagePaths] of [...byFolder.entries()].sort()) {
+      imagePaths.sort();
+      const imageUrls: string[] = [];
+
+      for (const sourcePath of imagePaths) {
+        const ext = path.extname(sourcePath).toLowerCase();
+        const newFilename = `${folderName}-${Date.now()}-${randomUUID().slice(0, 8)}${ext}`;
+        const uploadPath = path.join(UPLOAD_DIR, newFilename);
+
+        // Move rather than read-into-memory-and-write. rename is instant and
+        // allocation-free on the same filesystem; copyFile streams if not.
+        try {
+          await rename(sourcePath, uploadPath);
+        } catch {
+          await copyFile(sourcePath, uploadPath);
         }
+
+        imageUrls.push(`/uploads/${newFilename}`);
       }
+
+      products.push({
+        productCode: folderName,
+        name: "",
+        description: "",
+        primaryImage: imageUrls[0] || "",
+        imageUrls: imageUrls,
+        totalImages: imageUrls.length,
+      });
     }
 
-    // Cleanup temp directory
-    try {
-      await rm(tempDir, { recursive: true, force: true });
-    } catch (e) {
-      console.error("Error cleaning up temp dir:", e);
-    }
+    // Cleanup work directory
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    workDir = undefined;
 
     if (products.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "No product folders with images found in ZIP file" 
+      return res.status(400).json({
+        success: false,
+        message: "No product folders with images found in the ZIP. Each product needs its own folder containing image files.",
       });
     }
 
@@ -323,8 +369,19 @@ router.post('/', upload.single('file'), async (req: Request, res: Response) => {
       });
   
     } catch (error: any) {
-      console.error("Bulk folder import error:", error);
-      return res.status(error.status || 500).json({ success: false, message: error.message || "Error processing ZIP file" });
+      logger.error({ event: 'bulk_import_failed', message: error?.message });
+
+      const status = error?.status || 400;
+
+      return res.status(status).json({
+        success: false,
+        message: error?.message || "Error processing ZIP file",
+      });
+    } finally {
+      // Always reclaim disk, on success and on failure alike. Leaked archives
+      // and half-extracted folders would otherwise fill the volume.
+      if (zipPath) await unlink(zipPath).catch(() => {});
+      if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {});
     }
   });
 

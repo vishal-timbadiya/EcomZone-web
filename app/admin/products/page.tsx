@@ -1352,6 +1352,8 @@ function BulkImportModal({ onClose, onImport }: any) {
   const handleZipImport = async () => {
     if (!file) return
 
+    const sizeLabel = `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+
     setLoading(true)
     try {
       const formData = new FormData()
@@ -1373,12 +1375,47 @@ function BulkImportModal({ onClose, onImport }: any) {
         setFile(null) // Reset file for next upload
         alert(`✅ ZIP processed successfully!\n\nFound and extracted ${data.count} products with images.\n\nStep 3: Click "Download CSV Template" to get the pre-filled CSV with product codes and image URLs.`)
       } else {
-        const error = await res.json().catch(() => ({}))
-        alert(`ZIP processing failed: ${error.message || 'Unknown error'}`)
+        // Read the body as text first: a rejection from the reverse proxy (for
+        // example an over-sized upload) returns HTML, and res.json() on that
+        // throws, which used to surface as a misleading "Network error".
+        const raw = await res.text().catch(() => '')
+        let message = ''
+
+        try {
+          message = JSON.parse(raw).message || ''
+        } catch {
+          message = ''
+        }
+
+        if (!message) {
+          if (res.status === 413) {
+            message = `The ZIP (${sizeLabel}) is larger than the server accepts.`
+          } else if (res.status === 507) {
+            message = 'The server does not have enough free disk space for this archive.'
+          } else if (res.status === 502 || res.status === 504) {
+            message = `The server did not finish processing this ${sizeLabel} archive. Try a smaller ZIP.`
+          } else {
+            message = `Server returned ${res.status}.`
+          }
+        }
+
+        alert(`ZIP processing failed: ${message}`)
       }
-    } catch (error) {
+    } catch (error: any) {
+      // fetch() only rejects when the request never completed: the connection
+      // was cut, or the upload exceeded a limit somewhere between the browser
+      // and the app. Say that, rather than blaming the network outright.
       console.error('ZIP import error:', error)
-      alert('ZIP processing failed: Network error')
+      alert(
+        `ZIP upload did not complete (${sizeLabel}).
+
+` +
+        `The file most likely exceeded an upload limit between your browser and ` +
+        `the server, or the connection dropped mid-transfer.
+
+` +
+        `Try a smaller ZIP, or split it into several archives.`
+      )
     } finally {
       setLoading(false)
     }
